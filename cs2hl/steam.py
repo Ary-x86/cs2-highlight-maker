@@ -32,11 +32,15 @@ USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) cs2-highlight-maker"
 PLATFORM_WEB_BROWSER = 2
 GUARD_EMAIL, GUARD_DEVICE_CODE, GUARD_DEVICE_CONFIRM = 2, 3, 4
 
+# steamcommunity.com gcpd tabs, in the order the GUI shows them.
 MATCH_TABS = {
-    "matchhistorypremier": "Premier",
-    "matchhistorycompetitive": "Competitive",
     "matchhistorycompetitivepermap": "Ranked Competitive",
+    "matchhistorypremier": "Premier",
+    "matchhistoryrush": "Rush",
+    "matchhistorycompetitive": "Competitive",
     "matchhistorywingman": "Wingman",
+    "matchhistoryscrimmage": "Scrimmage",
+    "matchhistorycasual": "Casual",
 }
 
 
@@ -261,7 +265,7 @@ def parse_matches(page: str, mode: str, steamid: str) -> list[Match]:
         left, _, right = block.partition('<table class="csgo_scoreboard_inner_right">')
         left_cells = [c for c in _cells(left) if c]
         # First cell is e.g. "Competitive Dust II" / "Premier Ancient"
-        map_name = re.sub(r"^(Competitive|Premier|Wingman|Scrimmage)\s+", "", left_cells[0]) if left_cells else "?"
+        map_name = re.sub(r"^(Competitive|Premier|Wingman|Scrimmage|Rush|Casual|Ranked)\s+", "", left_cells[0]) if left_cells else "?"
         when = next((c for c in left_cells if re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", c)), "")
         duration = next((c.split(":", 1)[1].strip() for c in left_cells if c.startswith("Match Duration")), "")
         url_m = re.search(r'href="(https?://replay[^"]+\.dem\.bz2)"', left)
@@ -294,34 +298,81 @@ def parse_matches(page: str, mode: str, steamid: str) -> list[Match]:
     return matches
 
 
-def match_history(session: Session, per_tab_pages: int = 1) -> list[Match]:
-    """Newest first, across Premier / Competitive / Wingman."""
-    opener = session.opener()
-    found: dict[str, Match] = {}
-    for tab, label in MATCH_TABS.items():
-        url = f"{COMMUNITY}/profiles/{session.steamid}/gcpd/730?tab={tab}"
-        with _request(url, opener=opener) as resp:
-            page = resp.read().decode("utf-8", "replace")
-            final_url = resp.geturl()
-        if "/login" in final_url or "g_steamID = false" in page:
-            raise FriendlyError("Steam login is no longer valid",
-                                "steamcommunity.com did not accept the saved login.",
-                                "Open the Steam tab and log in again.")
-        token = re.search(r"g_sGcContinueToken = '(\d+)'", page)
-        session_id = re.search(r'g_sessionID = "([0-9a-f]+)"', page)
-        for m in parse_matches(page, label, session.steamid):
-            found.setdefault(m.id, m)
-        for _ in range(per_tab_pages - 1):
-            if not (token and session_id):
-                break
-            more = f"{COMMUNITY}/profiles/{session.steamid}/gcpd/730?" + urllib.parse.urlencode(
-                {"ajax": 1, "tab": tab, "continue_token": token.group(1), "sessionid": session_id.group(1)})
-            with _request(more, opener=opener) as resp:
+class TabHistory:
+    """Match history of one gcpd tab. Steam pages it by week, and weeks without matches come back empty,
+    so load() keeps following the continue token until enough matches were found."""
+
+    def __init__(self, session: Session, tab: str):
+        if tab not in MATCH_TABS:
+            raise FriendlyError("Unknown match type", tab, "Reload the window.")
+        self.session = session
+        self.tab = tab
+        self.label = MATCH_TABS[tab]
+        self.matches: list[Match] = []
+        self.token: str | None = None
+        self.session_id: str | None = None
+        self.started = False
+        self.exhausted = False
+        self.reached = ""  # date Steam says the next page continues from
+
+    def _parse(self, html_text: str) -> int:
+        known = {m.id for m in self.matches}
+        new = [m for m in parse_matches(html_text, self.label, self.session.steamid) if m.id not in known]
+        self.matches += new
+        return len(new)
+
+    def load(self, min_new: int = 5, max_requests: int = 6) -> int:
+        """Fetch more (older) matches. Returns how many new ones were found."""
+        opener = self.session.opener()
+        base = f"{COMMUNITY}/profiles/{self.session.steamid}/gcpd/730"
+        found = requests = 0
+        if not self.started:
+            with _request(f"{base}?tab={self.tab}", opener=opener) as resp:
+                page = resp.read().decode("utf-8", "replace")
+                final_url = resp.geturl()
+            if "/login" in final_url or "g_steamID = false" in page:
+                raise FriendlyError("Steam login is no longer valid",
+                                    "steamcommunity.com did not accept the saved login.",
+                                    "Open the Steam account page and log in again.")
+            token = re.search(r"g_sGcContinueToken = '(\d+)'", page)
+            sid = re.search(r'g_sessionID = "([0-9a-f]+)"', page)
+            reached = re.search(r'id="load_more_button_continue_text"[^>]*>([^<]*)<', page)
+            self.token = token.group(1) if token else None
+            self.session_id = sid.group(1) if sid else None
+            self.reached = reached.group(1).strip() if reached else ""
+            self.exhausted = self.token is None
+            self.started = True
+            requests += 1
+            found += self._parse(page)
+        while not self.exhausted and found < min_new and requests < max_requests:
+            url = f"{base}?" + urllib.parse.urlencode({"ajax": 1, "tab": self.tab, "continue_token": self.token,
+                                                       "sessionid": self.session_id})
+            with _request(url, opener=opener) as resp:
                 data = json.loads(resp.read().decode())
-            for m in parse_matches(data.get("html", ""), label, session.steamid):
-                found.setdefault(m.id, m)
-            token = re.match(r"(\d+)", str(data.get("continue_token") or ""))
-    return sorted(found.values(), key=lambda m: m.time, reverse=True)
+            requests += 1
+            if not data.get("success"):
+                raise FriendlyError("Steam did not return match history",
+                                    "Steam says the personal game data is unavailable right now.",
+                                    "Try again in a few minutes.")
+            found += self._parse(data.get("html", ""))
+            self.token = str(data["continue_token"]) if data.get("continue_token") else None
+            self.reached = data.get("continue_text") or ""
+            self.exhausted = self.token is None
+        self.matches.sort(key=lambda m: m.time, reverse=True)
+        return found
+
+
+def latest_match(session: Session) -> Match | None:
+    """Newest match with a downloadable replay, across every match type."""
+    best: Match | None = None
+    for tab in MATCH_TABS:
+        history = TabHistory(session, tab)
+        history.load(min_new=1, max_requests=3)  # replays expire after a few weeks anyway
+        for m in history.matches:
+            if m.url and (best is None or m.time > best.time):
+                best = m
+                break
+    return best
 
 
 # --- download -----------------------------------------------------------------------------------------
@@ -364,4 +415,7 @@ def download(match: Match, progress=None) -> Path:
         raise FriendlyError("Download failed", f"{type(e).__name__}: {e}",
                             "Check your connection and disk space, then try again.") from e
     part.replace(dem)
+    if match.time:  # date output folders by when the match was played, not when it was downloaded
+        played = datetime.fromisoformat(match.time).timestamp()
+        os.utime(dem, (played, played))
     return dem

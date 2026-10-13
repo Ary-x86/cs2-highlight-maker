@@ -16,6 +16,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.request
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,7 +41,7 @@ class App:
         self.runner = jobs.JobRunner()
         self.login: steam.QrLogin | steam.PasswordLogin | None = None
         self.login_error: dict | None = None
-        self.matches_cache: tuple[float, list[steam.Match]] | None = None
+        self.histories: dict[str, steam.TabHistory] = {}
         self.last_seen = time.time()
 
     # --- helpers ----------------------------------------------------------------------------------
@@ -63,7 +64,6 @@ class App:
             cs2, cs2_error = None, e.to_dict()
         session = steam.Session.load()
         current = self.runner.current
-        recent = sorted(self.runner.jobs.values(), key=lambda j: j.id, reverse=True)[:10]
         return {
             "config": cfg.to_dict(),
             "cs2_dir": cs2,
@@ -80,7 +80,9 @@ class App:
             "steam_running": pipeline.steam_running(),
             "cs2_running": Cs2.is_running(),
             "current_job": current.id if current else None,
-            "jobs": [{"id": j.id, "title": j.title, "status": j.status} for j in recent],
+            "queue_waiting": sum(1 for j in self.runner.jobs if j.status == "queued"),
+            "queue_paused": self.runner.paused,
+            "match_tabs": steam.MATCH_TABS,
         }
 
     def save_config(self, changes: dict) -> dict:
@@ -105,15 +107,50 @@ class App:
         config.save(cfg)
         return self.state()
 
-    def matches(self, refresh: bool, pages: int) -> list[dict]:
+    def matches(self, tab: str, refresh: bool, more: bool) -> dict:
         session = steam.Session.load()
         if session is None:
             raise FriendlyError("Not logged in to Steam", "The match list comes from your Steam account.",
-                                "Open the Steam tab and log in.")
-        if refresh or not self.matches_cache or time.time() - self.matches_cache[0] > 120:
-            self.matches_cache = (time.time(), steam.match_history(session, per_tab_pages=pages))
+                                "Open the Steam account page and log in.")
+        history = self.histories.get(tab)
+        if refresh or history is None or history.session.steamid != session.steamid:
+            history = self.histories[tab] = steam.TabHistory(session, tab)
+        if not history.started or more:
+            history.load(min_new=5, max_requests=6)
         done = {k.split(".dem:")[0] for k, v in pipeline.load_state().items() if v.get("files")}
-        return [{**m.__dict__, "rendered": m.id in done} for m in self.matches_cache[1]]
+        queued = {jobs._spec_key(j.spec) for j in self.runner.jobs if j.status in jobs.ACTIVE}
+        return {"matches": [{**m.__dict__, "rendered": m.id in done, "queued": f"match:{m.id}" in queued}
+                            for m in history.matches],
+                "reached": history.reached, "exhausted": history.exhausted}
+
+    def queue(self) -> dict:
+        current = self.runner.current
+        return {"paused": self.runner.paused, "current": current.id if current else None,
+                "items": [j.summary() for j in self.runner.jobs]}
+
+    def add_to_queue(self, items: list[dict], mode: str | None) -> dict:
+        if mode is not None and mode not in MODES:
+            raise FriendlyError("Unknown video mode", mode, "Pick a mode in Settings.")
+        ids = []
+        for item in items:
+            kind = item.get("kind")
+            if kind == "match":
+                known = {f.name for f in dataclasses.fields(steam.Match)}
+                spec = {"kind": "match", "match": {k: v for k, v in item["match"].items() if k in known}}
+                if not spec["match"].get("url"):
+                    raise FriendlyError("Replay not available", f"{spec['match'].get('map')} has no replay to download.",
+                                        "Valve only keeps replays for a few weeks; pick a newer match.")
+            elif kind == "local":
+                if not Path(item["path"]).is_file():
+                    raise FriendlyError("Demo not found", item["path"], "Refresh the list.")
+                spec = {"kind": "local", "path": item["path"]}
+            elif kind == "latest":
+                spec = {"kind": "latest"}
+            else:
+                raise FriendlyError("Unknown job", str(kind), "Reload the window.")
+            spec["mode"] = mode or config.load().mode
+            ids.append(self.runner.add(spec, jobs.title_for(spec)).id)
+        return {"ids": ids, "paused": self.runner.paused}
 
     def local_demos(self) -> list[dict]:
         cfg = config.load()
@@ -173,7 +210,7 @@ class App:
             self.login, self.login_error = None, explain(e).to_dict()
             return {"state": "error", "error": self.login_error}
         if new:
-            self.login, self.matches_cache = None, None
+            self.login, self.histories = None, {}
             return {"state": "done", "account_name": new.account_name}
         result = {"state": "waiting"}
         if isinstance(self.login, steam.QrLogin):
@@ -247,7 +284,10 @@ def make_handler(app: App):
                 if url.path == "/api/state":
                     return self._json(app.state())
                 if url.path == "/api/matches":
-                    return self._json(app.matches(q.get("refresh") == "1", int(q.get("pages", 1))))
+                    return self._json(app.matches(q.get("tab", next(iter(steam.MATCH_TABS))),
+                                                  q.get("refresh") == "1", q.get("more") == "1"))
+                if url.path == "/api/queue":
+                    return self._json(app.queue())
                 if url.path == "/api/local":
                     return self._json(app.local_demos())
                 if url.path == "/api/outputs":
@@ -257,7 +297,7 @@ def make_handler(app: App):
                 if url.path == "/api/login/status":
                     return self._json(app.login_status())
                 if m := re.fullmatch(r"/api/jobs/(\d+)", url.path):
-                    job = app.runner.jobs.get(int(m.group(1)))
+                    job = app.runner.get(int(m.group(1)))
                     if job is None:
                         return self._json({"error": {"title": "No such job", "why": "", "fix": ""}}, 404)
                     return self._json(job.to_dict(int(q.get("since", 0))))
@@ -274,11 +314,20 @@ def make_handler(app: App):
                 body = self._body()
                 if url.path == "/api/config":
                     return self._json(app.save_config(body))
-                if url.path == "/api/jobs":
-                    return self._json(self._submit(body))
-                if m := re.fullmatch(r"/api/jobs/(\d+)/cancel", url.path):
-                    app.runner.cancel(int(m.group(1)))
-                    return self._json({"ok": True})
+                if url.path == "/api/queue/add":
+                    return self._json(app.add_to_queue(body.get("items", []), body.get("mode")))
+                if m := re.fullmatch(r"/api/queue/(\d+)/remove", url.path):
+                    app.runner.remove(int(m.group(1)))
+                    return self._json(app.queue())
+                if m := re.fullmatch(r"/api/queue/(\d+)/move", url.path):
+                    app.runner.move(int(m.group(1)), int(body.get("delta", 0)))
+                    return self._json(app.queue())
+                if url.path == "/api/queue/clear":
+                    app.runner.clear_finished()
+                    return self._json(app.queue())
+                if url.path == "/api/queue/pause":
+                    app.runner.set_paused(bool(body.get("paused")))
+                    return self._json(app.queue())
                 if url.path == "/api/login/qr":
                     app.login, app.login_error = steam.QrLogin(), None
                     return self._json(app.login_status())
@@ -295,7 +344,7 @@ def make_handler(app: App):
                     return self._json({"ok": True})
                 if url.path == "/api/logout":
                     steam.Session.logout()
-                    app.matches_cache = None
+                    app.histories = {}
                     return self._json({"ok": True})
                 if url.path == "/api/open":
                     app.open_path(body["path"], bool(body.get("reveal")))
@@ -310,50 +359,55 @@ def make_handler(app: App):
             except Exception as e:  # noqa: BLE001
                 self._error(e)
 
-        def _submit(self, body: dict) -> dict:
-            kind, mode = body.get("kind"), body.get("mode")
-            if mode is not None and mode not in MODES:
-                raise FriendlyError("Unknown video mode", mode, "Pick a mode in Settings.")
-            if kind == "latest":
-                job = app.runner.submit("Latest match", jobs.render_match(None, mode))
-            elif kind == "match":
-                known = {f.name for f in dataclasses.fields(steam.Match)}
-                match = steam.Match(**{k: v for k, v in body["match"].items() if k in known})
-                job = app.runner.submit(f"{match.mode} {match.map} ({match.time[:10]})",
-                                        jobs.render_match(match, mode))
-            elif kind == "local":
-                demo = Path(body["path"])
-                if not demo.is_file():
-                    raise FriendlyError("Demo not found", str(demo), "Refresh the list.")
-                job = app.runner.submit(demo.name, jobs.render_local(demo, mode))
-            else:
-                raise FriendlyError("Unknown job", str(kind), "Reload the window.")
-            return {"id": job.id}
-
     return Handler
 
 
+INSTANCE_PATH = WORK_DIR / "gui.json"
+
+
+def _open_window(url: str) -> None:
+    browser = _find_app_browser()
+    if browser:
+        profile = WORK_DIR / "gui-profile"
+        subprocess.Popen([browser, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1280,860",
+                          "--class=cs2hl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    else:
+        webbrowser.open(url)
+
+
+def _running_instance() -> str | None:
+    """URL of an already running app, so a second launch just opens another window onto the same queue."""
+    try:
+        info = json.loads(INSTANCE_PATH.read_text())
+        req = urllib.request.Request(f"http://127.0.0.1:{info['port']}/api/queue", headers={"X-Token": info["token"]})
+        with urllib.request.urlopen(req, timeout=2):
+            return f"http://127.0.0.1:{info['port']}/#token={info['token']}"
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def serve(open_window: bool = True, port: int = 0) -> None:
+    if open_window and (existing := _running_instance()):
+        print("CS2 Highlight Maker is already running; opening a window.", flush=True)
+        _open_window(existing)
+        return
     app = App()
     httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
-    url = f"http://127.0.0.1:{httpd.server_address[1]}/#token={app.token}"
+    port = httpd.server_address[1]
+    url = f"http://127.0.0.1:{port}/#token={app.token}"
+    fd = os.open(INSTANCE_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"port": port, "token": app.token, "pid": os.getpid()}, f)
     print(f"CS2 Highlight Maker running at {url}", flush=True)
-    print("Close the window to quit (the server stops shortly after, unless a render is running).")
+    print("Close the window to quit (it keeps running while the queue has work).", flush=True)
     if open_window:
-        browser = _find_app_browser()
-        if browser:
-            profile = WORK_DIR / "gui-profile"
-            subprocess.Popen([browser, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1280,860",
-                              "--class=cs2hl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
-        else:
-            webbrowser.open(url)
+        _open_window(url)
 
     def idle_watch():
         while True:
             time.sleep(10)
-            busy = app.runner.current is not None or any(j.status == "queued" for j in app.runner.jobs.values())
-            if not busy and time.time() - app.last_seen > IDLE_EXIT_SECONDS:
+            if not app.runner.busy and time.time() - app.last_seen > IDLE_EXIT_SECONDS:
                 httpd.shutdown()
                 return
 
@@ -363,3 +417,5 @@ def serve(open_window: bool = True, port: int = 0) -> None:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        INSTANCE_PATH.unlink(missing_ok=True)

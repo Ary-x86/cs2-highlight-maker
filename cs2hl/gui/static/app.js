@@ -11,7 +11,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 let S = null;            // last /api/state
 let jobId = null;        // job shown in the panel
 let logSeen = 0;
-let steamPages = 1;
+let modeTab = null;      // gcpd tab shown under "Steam matches"
+let Q = null;            // last /api/queue
+const selected = new Map();  // key -> queue item ({kind, match|path})
 let loginTimer = null;
 
 // ---------------------------------------------------------------- api
@@ -53,6 +55,7 @@ function showPage(name) {
   $$("nav button").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
   if (name === "videos") loadVideos();
+  if (name === "queue") pollQueue();
   if (name === "steam") renderSteam();
 }
 $$("nav button").forEach((b) => (b.onclick = () => showPage(b.dataset.page)));
@@ -84,10 +87,9 @@ async function refreshState() {
   $("#work-dir").textContent = S.work_dir;
   $("#btn-latest").classList.toggle("disabled", !S.session);
   $("#latest-hint").innerHTML = S.session
-    ? "Downloads your newest Premier / Competitive / Wingman replay from Steam, renders it, then deletes the replay."
+    ? "Finds your newest match of any mode on Steam, downloads the replay, renders it, then deletes the replay."
     : `Log in on the <a href="#" onclick="showPage('steam');return false">Steam account</a> page first, or use a demo from this PC below.`;
-  if (!jobId && S.current_job) watchJob(S.current_job);
-  else if (!jobId && S.jobs.length) watchJob(S.jobs[0].id);
+  if (!modeTab) { modeTab = Object.keys(S.match_tabs)[0]; renderModeTabs(); }
 }
 
 // ---------------------------------------------------------------- settings
@@ -271,40 +273,65 @@ $("#btn-open-out").onclick = () => api("/api/open", { path: S.clips_dir.replace(
 
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
 
-async function loadSteam(refresh = false) {
+function renderModeTabs() {
+  $("#mode-tabs").innerHTML = Object.entries(S.match_tabs)
+    .map(([tab, label]) => `<button data-mt="${tab}" class="${tab === modeTab ? "active" : ""}">${esc(label)}</button>`).join("");
+  $$("#mode-tabs button").forEach((b) => (b.onclick = () => { modeTab = b.dataset.mt; renderModeTabs(); loadSteam(); }));
+}
+
+// A list row with a selection checkbox. `item` is what gets queued; null means it can't be queued.
+function pickRow(key, item, metaHtml, status) {
+  const el = document.createElement("div");
+  el.className = "item" + (selected.has(key) ? " sel" : "");
+  el.innerHTML = `<div class="pick">${item ? `<input type="checkbox" ${selected.has(key) ? "checked" : ""}>` : `<span style="width:17px"></span>`}
+      <div class="meta">${metaHtml}</div></div>
+    <div class="actions">${item ? (status === "queued" ? `<span class="tag done">in queue</span>`
+      : `<button class="btn small primary">+ Add to queue</button>`) : `<span class="muted small">no replay</span>`}</div>`;
+  if (item) {
+    const box = $("input", el);
+    box.onchange = () => { box.checked ? selected.set(key, item) : selected.delete(key); el.classList.toggle("sel", box.checked); renderFab(); };
+    const btn = $(".actions button", el);
+    if (btn) btn.onclick = () => addToQueue([item]);
+  }
+  return el;
+}
+
+async function loadSteam(refresh = false, more = false) {
   const box = $("#steam-list");
   if (!S?.session) {
     box.innerHTML = `<div class="empty">Log in on the <a href="#" onclick="showPage('steam');return false">Steam account</a> page to see your matches.</div>`;
     $("#btn-more").classList.add("hidden");
+    $("#steam-reached").textContent = "";
     return;
   }
-  box.innerHTML = `<div class="empty">Loading your matches from Steam…</div>`;
+  const tab = modeTab;
+  if (!more) box.innerHTML = `<div class="empty">Loading ${esc(S.match_tabs[tab])} matches from Steam…</div>`;
+  $("#btn-more").classList.add("disabled");
   try {
-    const list = await api(`/api/matches?pages=${steamPages}${refresh ? "&refresh=1" : ""}`);
-    $("#btn-more").classList.remove("hidden");
-    if (!list.length) { box.innerHTML = `<div class="empty">Steam lists no matches yet.</div>`; return; }
+    const r = await api(`/api/matches?tab=${tab}${refresh ? "&refresh=1" : ""}${more ? "&more=1" : ""}`);
+    if (tab !== modeTab) return;
+    $("#btn-more").classList.toggle("hidden", r.exhausted);
+    $("#btn-more").classList.remove("disabled");
+    $("#steam-reached").textContent = r.reached ? `Showing matches back to ${r.reached}` : "";
+    if (!r.matches.length) {
+      box.innerHTML = `<div class="empty">No ${esc(S.match_tabs[tab])} matches in this period.${r.exhausted ? "" : " Try <b>Load older matches</b>."}</div>`;
+      return;
+    }
     box.innerHTML = "";
-    for (const m of list) {
-      const el = document.createElement("div");
-      el.className = "item";
-      el.innerHTML = `<div class="meta">
-          <span class="map">${esc(m.map)}</span>
-          <span class="tag">${esc(m.mode)}</span>
-          <span class="tag ${m.result}">${esc(m.score || "–")} ${m.result ? esc(m.result) : ""}</span>
-          <span class="muted small">${esc(m.kills)} / ${esc(m.assists)} / ${esc(m.deaths)} K/A/D</span>
-          <span class="muted small">${esc(fmtTime(m.time))}</span>
-          ${m.rendered ? `<span class="tag done">✔ made</span>` : ""}
-        </div>
-        <div class="actions">${m.url ? `<button class="btn small primary">Make highlights</button>` : `<span class="muted small">replay expired</span>`}</div>`;
-      const btn = $("button", el);
-      if (btn) btn.onclick = () => startJob({ kind: "match", match: m });
-      box.append(el);
+    for (const m of r.matches) {
+      const meta = `<span class="map">${esc(m.map)}</span>
+        <span class="tag ${m.result}">${esc(m.score || "–")} ${m.result ? esc(m.result) : ""}</span>
+        <span class="muted small">${esc(m.kills)} / ${esc(m.assists)} / ${esc(m.deaths)} K/A/D</span>
+        <span class="muted small">${esc(fmtTime(m.time))}${m.duration ? " · " + esc(m.duration) : ""}</span>
+        ${m.rendered ? `<span class="tag done">✔ made</span>` : ""}`;
+      box.append(pickRow(`match:${m.id}`, m.url ? { kind: "match", match: m } : null, meta, m.queued ? "queued" : ""));
     }
   } catch (e) {
     box.innerHTML = `<div class="error-card">${errorHtml(e)}</div>`;
+    $("#btn-more").classList.remove("disabled");
   }
 }
-$("#btn-more").onclick = () => { steamPages += 1; loadSteam(true); };
+$("#btn-more").onclick = () => loadSteam(false, true);
 $("#btn-refresh").onclick = () => { $("#tab-local").classList.contains("active") ? loadLocal() : loadSteam(true); };
 
 async function loadLocal() {
@@ -312,16 +339,13 @@ async function loadLocal() {
   try {
     const list = await api("/api/local");
     if (!list.length) { box.innerHTML = `<div class="empty">No .dem files in the replays folder.</div>`; return; }
+    const queued = new Set((Q?.items || []).filter((j) => ["queued", "running"].includes(j.status)).map((j) => j.title));
     box.innerHTML = "";
     for (const d of list) {
-      const el = document.createElement("div");
-      el.className = "item";
-      el.innerHTML = `<div class="meta"><span class="map">${esc(d.name)}</span>
-          <span class="muted small">${esc(d.size_mb)} MB · ${esc(fmtTime(d.modified))}</span>
-          ${d.rendered ? `<span class="tag done">✔ made</span>` : ""}${d.skipped ? `<span class="tag">not your match</span>` : ""}</div>
-        <div class="actions"><button class="btn small primary">Make highlights</button></div>`;
-      $("button", el).onclick = () => startJob({ kind: "local", path: d.path });
-      box.append(el);
+      const meta = `<span class="map">${esc(d.name)}</span>
+        <span class="muted small">${esc(d.size_mb)} MB · ${esc(fmtTime(d.modified))}</span>
+        ${d.rendered ? `<span class="tag done">✔ made</span>` : ""}${d.skipped ? `<span class="tag">not your match</span>` : ""}`;
+      box.append(pickRow(`local:${d.path}`, { kind: "local", path: d.path }, meta, queued.has(d.name) ? "queued" : ""));
     }
   } catch (e) { box.innerHTML = `<div class="error-card">${errorHtml(e)}</div>`; }
 }
@@ -347,24 +371,113 @@ function videoItem(path, title, sub) {
   return el;
 }
 
-// ---------------------------------------------------------------- jobs
+// ---------------------------------------------------------------- selection + queue
 
-async function startJob(body) {
+function renderFab() {
+  $("#fab").classList.toggle("hidden", selected.size === 0);
+  $("#fab-text").textContent = `${selected.size} selected`;
+}
+$("#fab-add").onclick = async () => {
+  if (await addToQueue([...selected.values()])) {
+    selected.clear();
+    renderFab();
+    $$(".item.sel").forEach((el) => { el.classList.remove("sel"); const c = $("input", el); if (c) c.checked = false; });
+  }
+};
+$("#fab-clear").onclick = () => {
+  selected.clear(); renderFab();
+  $$(".item.sel").forEach((el) => { el.classList.remove("sel"); const c = $("input", el); if (c) c.checked = false; });
+};
+
+async function addToQueue(items) {
   try {
-    const { id } = await api("/api/jobs", body);
-    toast(S.current_job ? "Queued" : "Started", "Progress shows at the top of this page.");
-    if (!S.current_job || !jobId) watchJob(id);
-    showPage("home");
-    $("#job").scrollIntoView({ behavior: "smooth" });
-    refreshState();
+    const r = await api("/api/queue/add", { items, mode: S.config.mode });
+    toast(`Added ${r.ids.length} to the queue`, r.paused ? "The queue is paused: press Start on the Queue page." : "Rendering starts automatically, one at a time.");
+    await pollQueue();
+    if ($("#tab-local").classList.contains("active")) loadLocal(); else loadSteam();
+    return true;
+  } catch (e) { fail(e); return false; }
+}
+$("#btn-latest").onclick = () => addToQueue([{ kind: "latest" }]);
+
+const STATUS_ICON = { queued: "⏳", running: "🎬", done: "✅", failed: "⚠️", cancelled: "✖" };
+
+async function pollQueue() {
+  try { Q = await api("/api/queue"); } catch { return; }
+  const waiting = Q.items.filter((j) => j.status === "queued").length;
+  const running = Q.items.find((j) => j.status === "running");
+  $("#queue-count").textContent = waiting + (running ? 1 : 0);
+  $("#queue-count").classList.toggle("hidden", !waiting && !running);
+  $("#btn-pause").textContent = Q.paused ? "▶ Start" : "⏸ Pause";
+  $("#paused-banner").classList.toggle("hidden", !(Q.paused && waiting));
+
+  // "now rendering" strip on the Highlights page
+  $("#now-bar").classList.toggle("hidden", !running);
+  if (running) {
+    $("#now-title").textContent = running.title;
+    $("#now-stage").textContent = `· ${running.stage}${running.detail ? " · " + running.detail : ""}`;
+    $("#now-progress").style.width = `${Math.round((running.progress ?? 0) * 100)}%`;
+  }
+
+  if (jobId === null || !Q.items.some((j) => j.id === jobId)) {
+    const pick = running || Q.items.find((j) => j.status === "queued") || Q.items[Q.items.length - 1];
+    if (pick) watchJob(pick.id); else { jobId = null; $("#job").classList.add("hidden"); }
+  }
+
+  const box = $("#queue-list");
+  if (!$("#page-queue").classList.contains("active")) return;
+  if (!Q.items.length) { box.innerHTML = `<div class="empty">The queue is empty. Tick matches on the Highlights page and press <b>+ Add to queue</b>.</div>`; return; }
+  box.innerHTML = "";
+  const order = [...Q.items.filter((j) => j.status === "running"), ...Q.items.filter((j) => j.status === "queued"),
+                 ...Q.items.filter((j) => !["running", "queued"].includes(j.status)).reverse()];
+  for (const j of order) {
+    const el = document.createElement("div");
+    el.className = "item qitem" + (j.id === jobId ? " sel" : "");
+    const pct = Math.round((j.progress ?? 0) * 100);
+    el.innerHTML = `<div class="icon">${STATUS_ICON[j.status] || ""}</div>
+      <div><div class="meta"><span class="map">${esc(j.title)}</span>
+        <span class="tag">${j.mode === "blur60" ? "Motion blur 60" : "Smooth 120"}</span>
+        <span class="muted small">${esc(j.status === "queued" ? (j.stage || "waiting") : j.stage)}${j.detail && j.status === "running" ? " · " + esc(j.detail) : ""}${j.elapsed ? " · ⏱ " + esc(j.elapsed) : ""}</span>
+        ${j.error ? `<span class="tag loss">${esc(j.error.title)}</span>` : ""}${j.files.length ? `<span class="tag done">${j.files.length} video(s)</span>` : ""}</div>
+        ${j.status === "running" ? `<div class="mini"><div style="width:${pct}%"></div></div>` : ""}</div>
+      <div class="actions">
+        ${j.status === "queued" ? `<button class="btn small" data-a="up" title="Move up">↑</button><button class="btn small" data-a="down" title="Move down">↓</button>` : ""}
+        ${["failed", "cancelled"].includes(j.status) ? `<button class="btn small" data-a="retry">Retry</button>` : ""}
+        <button class="btn small" data-a="view">Details</button>
+        <button class="btn small danger" data-a="remove" title="${j.status === "running" ? "Cancel" : "Remove"}">${j.status === "running" ? "Cancel" : "✕"}</button>
+      </div>`;
+    $$("[data-a]", el).forEach((b) => (b.onclick = () => queueAction(j, b.dataset.a)));
+    box.append(el);
+  }
+}
+
+async function queueAction(j, action) {
+  try {
+    if (action === "up" || action === "down") Q = await api(`/api/queue/${j.id}/move`, { delta: action === "up" ? -1 : 1 });
+    else if (action === "remove") {
+      if (j.status === "running" && !confirm("Stop rendering this match? CS2 will be closed.")) return;
+      Q = await api(`/api/queue/${j.id}/remove`, {});
+    } else if (action === "retry") {
+      const full = await api(`/api/jobs/${j.id}`);
+      await api(`/api/queue/${j.id}/remove`, {});
+      await api("/api/queue/add", { items: [full.spec], mode: j.mode });
+    } else if (action === "view") { watchJob(j.id); $("#job").scrollIntoView({ behavior: "smooth" }); }
+    pollQueue();
   } catch (e) { fail(e); }
 }
-$("#btn-latest").onclick = () => startJob({ kind: "latest" });
+
+$("#btn-pause").onclick = () => api("/api/queue/pause", { paused: !Q.paused }).then(pollQueue).catch(fail);
+$("#btn-resume").onclick = () => api("/api/queue/pause", { paused: false }).then(pollQueue).catch(fail);
+$("#btn-clear").onclick = () => api("/api/queue/clear", {}).then(pollQueue).catch(fail);
+
+// ---------------------------------------------------------------- job details
 
 function watchJob(id) {
+  if (jobId === id) return;
   jobId = id;
   logSeen = 0;
   $("#job-log").textContent = "";
+  $("#job-results").dataset.job = "";
   $("#job").classList.remove("hidden");
 }
 
@@ -382,6 +495,7 @@ async function pollJob() {
   bar.parentElement.classList.toggle("indeterminate", j.status === "running" && j.progress === null);
   bar.style.width = `${Math.round((j.progress ?? (j.status === "done" ? 1 : 0)) * 100)}%`;
   $("#job-cancel").classList.toggle("hidden", !["running", "queued"].includes(j.status));
+  $("#job-cancel").textContent = j.status === "running" ? "Cancel" : "Remove";
   if (j.log.length) {
     const pre = $("#job-log");
     const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
@@ -398,12 +512,11 @@ async function pollJob() {
     res.innerHTML = "<b>Your videos</b>";
     for (const f of [...j.files].reverse()) res.append(videoItem(f, f.split("/").pop(), f.includes("/montages/") ? "montage" : "clip"));
   }
-  if (["done", "failed", "cancelled"].includes(j.status) && S?.current_job === null) {
-    const next = S.jobs.find((x) => x.status === "running" || x.status === "queued");
-    if (next && next.id !== jobId) watchJob(next.id);
-  }
 }
-$("#job-cancel").onclick = () => api(`/api/jobs/${jobId}/cancel`, {}).then(() => toast("Cancelling…")).catch(fail);
+$("#job-cancel").onclick = () => {
+  const j = Q?.items.find((x) => x.id === jobId);
+  if (j) queueAction(j, "remove");
+};
 
 // ---------------------------------------------------------------- steam login
 
@@ -477,6 +590,8 @@ $("#btn-logout").onclick = async () => {
   renderSteam();
   loadSteam();
   if (HASH.get("page")) showPage(HASH.get("page"));
+  await pollQueue();
   setInterval(pollJob, 1000);
+  setInterval(pollQueue, 2000);
   setInterval(async () => { const before = S?.config?.mode; await refreshState(); if (S && S.config.mode !== before) fillSettings(); }, 5000);
 })();

@@ -12,6 +12,7 @@
   <div class="brand"><img src="icon.svg" alt=""><div><b>CS2 Highlight</b><span>Maker</span></div></div>
   <nav>
     <button data-page="home" class="active">🎬 Highlights</button>
+    <button data-page="queue">📋 Queue <span class="count hidden" id="queue-count"></span></button>
     <button data-page="videos">📁 My videos</button>
     <button data-page="settings">⚙️ Settings</button>
     <button data-page="steam">🔑 Steam account</button>
@@ -39,7 +40,44 @@
       <button class="btn primary big" id="btn-latest">⚡ Make highlights of my latest match</button>
     </div>
 
-    <div class="card job hidden" id="job">
+    <div class="card nowbar hidden" id="now-bar">
+      <div><span class="muted small">Now rendering</span> <b id="now-title"></b> <span class="muted small" id="now-stage"></span></div>
+      <div class="bar"><div id="now-progress"></div></div>
+      <button class="btn small" onclick="showPage('queue')">Open queue</button>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button data-tab="steam" class="active">Steam matches</button>
+        <button data-tab="local">Demos on this PC</button>
+        <div class="spacer"></div>
+        <button class="btn small" id="btn-refresh">↻ Refresh</button>
+      </div>
+      <div id="tab-steam" class="tab active">
+        <div class="subtabs" id="mode-tabs"></div>
+        <div id="steam-list" class="list"></div>
+        <div class="center"><span class="muted small" id="steam-reached"></span><br><button class="btn small hidden" id="btn-more">Load older matches</button></div>
+      </div>
+      <div id="tab-local" class="tab">
+        <p class="muted small">Demos in <code id="replays-dir"></code>, e.g. ones you downloaded inside CS2 (Watch → Your Matches) or FACEIT demos you dropped there.</p>
+        <div id="local-list" class="list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUEUE -->
+  <section id="page-queue" class="page">
+    <header class="page-head">
+      <div><h1>Queue</h1><p class="muted">Matches are rendered one after another. The queue is saved, so it survives closing the app.</p></div>
+      <div class="row">
+        <button class="btn" id="btn-pause">⏸ Pause</button>
+        <button class="btn" id="btn-clear">Clear finished</button>
+        <button class="btn primary" onclick="showPage('home')">+ Add matches</button>
+      </div>
+    </header>
+    <div class="banner hidden" id="paused-banner">⏸ The queue is paused. <button class="btn small primary" id="btn-resume">▶ Start queue</button></div>
+    <div id="queue-list" class="list"></div>
+    <div class="card job hidden" id="job" style="margin-top:16px">
       <div class="job-head">
         <div><span class="badge" id="job-status"></span> <b id="job-title"></b></div>
         <div class="job-actions"><span class="muted" id="job-elapsed"></span><button class="btn small danger" id="job-cancel">Cancel</button></div>
@@ -52,22 +90,6 @@
       <details id="job-log-wrap" open><summary>Log</summary><pre id="job-log"></pre></details>
     </div>
 
-    <div class="card">
-      <div class="tabs">
-        <button data-tab="steam" class="active">Steam matches</button>
-        <button data-tab="local">Demos on this PC</button>
-        <div class="spacer"></div>
-        <button class="btn small" id="btn-refresh">↻ Refresh</button>
-      </div>
-      <div id="tab-steam" class="tab active">
-        <div id="steam-list" class="list"></div>
-        <div class="center"><button class="btn small hidden" id="btn-more">Load older matches</button></div>
-      </div>
-      <div id="tab-local" class="tab">
-        <p class="muted small">Demos in <code id="replays-dir"></code>, e.g. ones you downloaded inside CS2 (Watch → Your Matches) or FACEIT demos you dropped there.</p>
-        <div id="local-list" class="list"></div>
-      </div>
-    </div>
   </section>
 
   <!-- VIDEOS -->
@@ -213,13 +235,15 @@
         <li><b>Record</b>: CS2 opens by itself, jumps to each highlight, spectates you and saves every frame at a fixed frame rate. This is not screen recording, so the result is perfectly smooth even if your PC stutters. Don't click into the CS2 window while it works; it closes when done.</li>
         <li><b>Encode</b>: the frames become one MP4 per highlight, plus a montage of the whole match.</li>
       </ol>
+      <h2>Queue</h2>
+      <p>Tick several matches (or demos) and press <b>+ Add to queue</b> in the floating bar, or click <b>Add to queue</b> on a single match. They render one after another, each producing its clips and its own montage. On the Queue page you can reorder (↑ ↓), remove (✕) or pause. The queue is saved: if you close the app while it is working, it keeps going in the background; if the app is restarted, unfinished items wait until you press Start.</p>
       <h2>Video styles</h2>
       <p><b>Smooth · 120 fps</b>: every output frame is a real game frame. Crisp, smooth, and can be slowed down 2× in an editor without stutter.</p>
       <p><b>Motion blur · 60 fps</b>: CS2 renders 4× more frames (240 per second), and each group of 4 is averaged into one. Fast movement smears naturally like a real camera, the look of most frag movies. It takes about twice as long.</p>
       <h2>How long does it take?</h2>
       <p>CS2 saves roughly 10–15 frames per second while recording, so a match with four highlights takes about 15 minutes (Smooth) or 30 minutes (Motion blur). The progress bar shows the time left.</p>
       <h2>Where do matches come from?</h2>
-      <p><b>Steam matches</b> come from your Steam "Personal Game Data" pages, the same ones with the <i>Download Replay</i> buttons. Replays are downloaded from Valve's replay servers. Those links are plain HTTP, which is why browsers call them unsafe; the files come straight from Valve. Valve deletes replays after a few weeks, so old matches show as expired.</p>
+      <p><b>Steam matches</b> are split by mode (Ranked Competitive, Premier, Rush, Wingman, …) and come from your Steam "Personal Game Data" pages, the same ones with the <i>Download Replay</i> buttons. Replays are downloaded from Valve's replay servers. Those links are plain HTTP, which is why browsers call them unsafe; the files come straight from Valve. Valve deletes replays after a few weeks, so old matches show as expired.</p>
       <p><b>Demos on this PC</b> are <code>.dem</code> files in your CS2 <code>replays</code> folder (in-game downloads, or any demo you copy there).</p>
       <h2>Troubleshooting</h2>
       <dl>
@@ -248,6 +272,11 @@ cs2hl clean      # remove the CS2 plugin after a crash</pre>
   <div class="picker-list" id="picker-list"></div>
   <div class="picker-foot"><span class="muted small" id="picker-note"></span><button class="btn primary" id="picker-ok">Use this folder</button></div>
 </dialog>
+<div class="fab hidden" id="fab">
+  <span id="fab-text"></span>
+  <button class="btn primary" id="fab-add">+ Add to queue</button>
+  <button class="btn small" id="fab-clear" title="Clear selection">✕</button>
+</div>
 <div id="toast"></div>
 <script src="app.js"></script>
 </body>
