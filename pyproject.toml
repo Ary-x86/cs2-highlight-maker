@@ -1,11 +1,10 @@
 [project]
 name = "cs2hl"
 version = "0.1.0"
-description = "Automatic CS2 highlight clips from demos, rendered frame-by-frame via CS Demo Manager"
+description = "Automatic CS2 highlight clips from demos, rendered frame-by-frame inside CS2"
 requires-python = ">=3.11"
 dependencies = [
     "demoparser2>=0.40",
-    "watchdog>=4.0",
 ]
 
 [project.scripts]

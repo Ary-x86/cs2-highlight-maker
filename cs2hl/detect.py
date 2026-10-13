@@ -28,6 +28,7 @@ class Highlight:
     kills: list[Kill]
     clutch_vs: int = 0  # 1vN won, 0 if not a clutch
     score: float = 0.0
+    player_slot: int = 0  # spectator slot of the POV player (user_id + 1)
     # (start_tick, end_tick) windows; several when kills are far apart so dead time gets cut
     sequences: list[tuple[int, int]] = field(default_factory=list)
 
@@ -172,6 +173,16 @@ def analyze(demo: Path, steamids: list[str], *, min_kills: int = 3, clutch_min_e
                 end_cap = rend
         seqs = _windows([k.tick for k in kills], tickrate, pre_seconds, post_seconds,
                         max_gap_seconds, end_cap)
-        highlights.append(Highlight(rnd, kills, clutch_vs, round(score, 1), seqs))
+        highlights.append(Highlight(rnd, kills, clutch_vs=clutch_vs, score=round(score, 1), sequences=seqs))
+
+    # user_id can change after a reconnect, so look it up at each highlight's start.
+    if highlights:
+        starts = [h.sequences[0][0] for h in highlights]
+        ids = parser.parse_ticks(["user_id"], ticks=starts)
+        ids = ids[ids["steamid"].astype(str) == pov]
+        slot_at = {int(t): int(u) + 1 for t, u in zip(ids["tick"], ids["user_id"])}
+        fallback = next(iter(slot_at.values()), 0)
+        for h, start in zip(highlights, starts):
+            h.player_slot = slot_at.get(start, fallback)
 
     return DemoInfo(demo, header.get("map_name", "unknown"), tickrate, pov, pov_name, highlights)

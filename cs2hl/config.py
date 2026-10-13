@@ -11,6 +11,10 @@ STEAM_ROOT = Path.home() / ".local/share/Steam"
 # Workspace lives on a big disk; this symlink has no spaces so CS2's +playdemo works.
 WORK_DIR = Path.home() / ".local/share/cs2hl"
 CONFIG_PATH = WORK_DIR / "config.toml"
+CLIPS_DIR = WORK_DIR / "clips"
+MONTAGES_DIR = WORK_DIR / "montages"
+PLUGIN_SO = WORK_DIR / "bin/libserver.so"
+STATE_PATH = WORK_DIR / "state.json"
 
 # render_fps: frames CS2 renders per second of game time (frame-by-frame, not real time).
 # blend: how many rendered frames are averaged into one output frame (motion blur).
@@ -33,13 +37,11 @@ class Config:
     pre_seconds: float = 3.0
     post_seconds: float = 2.0
     max_gap_seconds: float = 8.0
-    # Max raw TGA data (GB) rendered per CS2 launch before encoding and freeing it
-    raw_budget_gb: float = 35.0
+    # Give up on a CS2 launch after this many seconds (plus render time)
+    launch_timeout: int = 300
     # Encoder
     video_codec: str = "h264_nvenc"
     quality: int = 19
-    # Postgres used by CS Demo Manager
-    pg_port: int = 5433
 
     @property
     def replays_dir(self) -> Path:

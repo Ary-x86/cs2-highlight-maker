@@ -4,3 +4,8 @@ __pycache__/
 config.toml
 *.dem
 *.mp4
+workspace
+clips
+montages
+replays
+*.egg-info/

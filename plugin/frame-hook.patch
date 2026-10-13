@@ -1,0 +1,138 @@
+diff --git a/cs2-server-plugin/cs2-server-plugin/main.cpp b/cs2-server-plugin/cs2-server-plugin/main.cpp
+index 0858843..9c5fb51 100644
+--- a/cs2-server-plugin/cs2-server-plugin/main.cpp
++++ b/cs2-server-plugin/cs2-server-plugin/main.cpp
+@@ -75,6 +75,7 @@ ISource2Client* client = NULL;
+ FrameStageNotifyFn originalFrameStageNotify = NULL;
+ ICvar* g_pCVar = NULL;
+ std::thread* wsConnectionThread = NULL;
++std::thread* frameHookThread = NULL;
+ WebSocket::pointer ws;
+ string gameInfoPath;
+ string gameInfoBackupPath;
+@@ -187,6 +188,8 @@ void PatchVTableEntry(void** vtable, int index, void* newFunc) {
+ #endif
+ }
+ 
++void WaitForClientInterface();
++
+ void QueueEngineCommand(const std::string& cmd) {
+     std::lock_guard<std::mutex> lock(pendingCommandsMutex);
+     pendingCommands.push(cmd);
+@@ -514,6 +517,7 @@ bool Connect(IAppSystem* appSystem, CreateInterfaceFn factoryFn)
+     ConVar_Register();
+ 
+     wsConnectionThread = new std::thread(ConnectToWebsocketServerLoop);
++    frameHookThread = new std::thread(WaitForClientInterface);
+ 
+     RestoreGameinfoFile();
+ 
+@@ -538,6 +542,11 @@ void Shutdown()
+         wsConnectionThread = NULL;
+     }
+ 
++    if (frameHookThread != NULL) {
++        frameHookThread->join();
++        frameHookThread = NULL;
++    }
++
+     ConVar_Unregister();
+ 
+     // Our static ConCommands unregister themselves in their destructor at plugin unload, but by then
+@@ -566,29 +575,81 @@ void AssertInsecureParameterIsPresent()
+     }
+ }
+ 
+-void NewClientFullyConnect(void* thisptr, int playerSlot)
++std::mutex frameHookMutex;
++
++// Hook FrameStageNotify to call engine commands from the engine thread since it's not thread safe to call engine
++// commands from another thread.
++bool InstallFrameHook(ISource2Client* candidate)
+ {
+-    Log("ClientFullyConnect: playerSlot=%d", playerSlot);
++    std::lock_guard<std::mutex> lock(frameHookMutex);
+     if (client != NULL) {
+-        originalClientFullyConnect(thisptr, playerSlot);
+-        return;
++        return true;
+     }
+-
+-    // Hook FrameStageNotify to call engine commands from the engine thread since it's not thread safe to call engine
+-    // commands from another thread.
+-    client = (ISource2Client*)factory("Source2Client002", NULL);
+-    if (client != NULL) {
+-        Log("Hooking FrameStageNotify");
+-        auto vtable = *(void***)client;
+-        originalFrameStageNotify = (FrameStageNotifyFn)vtable[36];
+-        PatchVTableEntry(vtable, 36, (void*)&NewFrameStageNotify);
+-        Log("Hooked FrameStageNotify");
++    if (candidate == NULL) {
++        return false;
+     }
+-    
++
++    client = candidate;
++    Log("Hooking FrameStageNotify");
++    auto vtable = *(void***)client;
++    originalFrameStageNotify = (FrameStageNotifyFn)vtable[36];
++    PatchVTableEntry(vtable, 36, (void*)&NewFrameStageNotify);
++    Log("Hooked FrameStageNotify");
++
+     // Since the 23/05/2024 CS2 update, the demo playback UI is displayed by default.
+     // We have to set the demo_ui_mode convar to 0 before starting the playback prevent the UI from being displayed.
+     QueueEngineCommand("demo_ui_mode 0");
+     QueueEngineCommand("sv_cheats 1"); // required to unlock commands such as getposcopy
++    return true;
++}
++
++// Resolve Source2Client002 through the client module's own CreateInterface export, which only reads its load-time
++// interface registry, instead of the app-system factory that is still being populated by the engine thread.
++ISource2Client* FindClientInterface()
++{
++#ifdef _WIN32
++    HMODULE clientModule = GetModuleHandle("client.dll");
++#else
++    string clientPath = string(Plat_GetGameDirectory()) + "/csgo/bin/linuxsteamrt64/libclient.so";
++    void* clientModule = dlopen(clientPath.c_str(), RTLD_NOW | RTLD_NOLOAD);
++#endif
++    if (clientModule == NULL) {
++        return NULL;
++    }
++
++    auto clientCreateInterface = (CreateInterfaceFn)GetLibAddress(clientModule, "CreateInterface");
++    ISource2Client* result = NULL;
++    if (clientCreateInterface != NULL) {
++        result = (ISource2Client*)clientCreateInterface("Source2Client002", NULL);
++    }
++#ifndef _WIN32
++    dlclose(clientModule); // drops the reference taken by RTLD_NOLOAD
++#endif
++    return result;
++}
++
++// Since the 19/08/2026 CS2 update, ClientFullyConnect is no longer called during demo playback and Source2Client002
++// is not available yet when Connect runs, so wait for the client module in the background.
++void WaitForClientInterface()
++{
++    const int timeoutMs = 180000;
++    for (int waited = 0; waited < timeoutMs && !isQuitting; waited += 50) {
++        if (client != NULL || InstallFrameHook(FindClientInterface())) {
++            return;
++        }
++        std::this_thread::sleep_for(std::chrono::milliseconds(50));
++    }
++    if (client == NULL && !isQuitting) {
++        Log("Source2Client002 not found after %d ms, tick actions will not run", timeoutMs);
++    }
++}
++
++void NewClientFullyConnect(void* thisptr, int playerSlot)
++{
++    Log("ClientFullyConnect: playerSlot=%d", playerSlot);
++    if (client == NULL) {
++        InstallFrameHook((ISource2Client*)factory("Source2Client002", NULL));
++    }
+ 
+     originalClientFullyConnect(thisptr, playerSlot);
+ }
