@@ -1,93 +1,81 @@
-# cs2-highlight-maker
+# CS2 Highlight Maker
 
-Local, free replacement for Leetify-style highlight clips on Linux. It finds your multikills and clutches in CS2 demos, has CS2 render them frame by frame at a fixed framerate (no screen capture, so the output stays smooth whatever the PC load), and encodes per-highlight clips plus a per-match montage.
+Free, local alternative to Leetify-style highlight clips, for Linux. Log in with Steam, click **Make highlights of my latest match**, and get a clip of every multi-kill and clutch plus a montage of the whole match.
+
+- **Smooth recording.** CS2 itself renders every frame at a fixed frame rate (120 fps, or 240 fps blended to 60 fps for motion blur). It isn't screen capture, so a busy PC can't make it stutter.
+- **Downloads your matches for you.** Premier, Competitive and Wingman replays come from your Steam match history and are deleted after rendering.
+- **Crosshairs.** Use donk's, a classic one, or build your own, with a live preview.
+- **Explains what happened.** You get live progress, time left and a log. Errors say what went wrong and how to fix it.
+
+## Install (one command)
+
+```sh
+git clone https://github.com/<you>/cs2-highlight-maker && cd cs2-highlight-maker && ./install.sh
+```
+
+The installer:
+- installs anything that's missing (ffmpeg, a C++ compiler, uv), after asking you first
+- asks where to keep the workspace; pick a disk with a few GB free
+- builds the recording plugin
+- adds **CS2 Highlight Maker** to your app menu and opens it
+
+Requirements: Linux, Steam with CS2 installed, a GPU that runs CS2. An NVIDIA GPU makes encoding faster, but a CPU fallback is built in.
+
+## Using it
+
+1. **Steam account** page: scan the QR code with the Steam mobile app, or log in with your password and Steam Guard code. The login is stored only on your PC.
+2. **Highlights** page: click **Make highlights of my latest match**, or pick any match from the list. **Demos on this PC** lists `.dem` files from your CS2 replays folder.
+3. Watch the progress panel. CS2 opens, records, and closes by itself; don't touch it while it works. A match with four highlights takes about 15 minutes in Smooth mode and about 30 with motion blur.
+4. **My videos** page: play the clips, or open the folder they're in.
+
+Everything is explained on the in-app **Help** page.
+
+### Video styles
+
+| style | how | result |
+|---|---|---|
+| Smooth · 120 fps (default) | every game frame is kept | crisp; can be slowed 2× in an editor |
+| Motion blur · 60 fps | 240 fps rendered, 4 frames averaged per output frame | soft, cinematic blur on fast flicks; about 2× slower |
+
+### Crosshairs
+
+- **donk** (default): tiny cyan static cross
+- **Classic**: white four lines with a centre dot and outline
+- **Custom**: build your own in Settings
+
+Your own CS2 settings are never changed. Anything the recording session touches (volume, HUD, crosshair) is set back to your values before CS2 quits.
 
 ## How it works
 
-1. **Detect**: [demoparser2](https://github.com/LaihoE/demoparser) reads the demo. Every Steam account that has logged in on this machine counts as "you". A highlight is a round with 3+ kills or a won 1v2+ clutch. Long gaps between kills get cut.
-2. **Record**: the [CS Demo Manager](https://github.com/akiver/cs-demo-manager) CS2 server plugin runs console commands at given demo ticks. `cs2hl` writes that action list and launches CS2 with `-insecure`. CS2 seeks to each highlight, spectates you, and records with `startmovie … jpg wav` under `host_framerate`. Then it quits.
-3. **Encode**: ffmpeg + NVENC turns the frames into H.264 MP4. Multi-part highlights are joined, and all clips of a match are stitched into a montage.
+1. [demoparser2](https://github.com/LaihoE/demoparser) finds rounds where you got 3+ kills or won a 1v2+ clutch. Both thresholds can be changed in Settings. Long pauses between kills are cut out.
+2. The [CS Demo Manager](https://github.com/akiver/cs-demo-manager) CS2 server plugin runs console commands at given demo ticks. The app loads the plugin into CS2 (`-insecure`, so no VAC risk), and CS2 then seeks to each highlight, spectates you and records with `startmovie … jpg wav` at a locked `host_framerate`.
+3. ffmpeg encodes the frames (NVENC, or x264 as fallback), joins multi-part highlights and builds the montage.
 
-The upstream plugin stopped running tick actions after the 2026-08-19 CS2 update ([cs-demo-manager#1458](https://github.com/akiver/cs-demo-manager/issues/1458)). `plugin/frame-hook.patch` fixes this by hooking `FrameStageNotify` as soon as the client interface exists. `plugin/build.sh` builds the patched `libserver.so`.
+The upstream plugin stopped running tick actions after the 2026-08-19 CS2 update ([cs-demo-manager#1458](https://github.com/akiver/cs-demo-manager/issues/1458)). `plugin/frame-hook.patch` fixes that, and `plugin/build.sh` builds the patched plugin. The installer runs it for you.
 
-## Setup
+Match history is read from Steam's *Personal Game Data* pages (the ones with **Download Replay** buttons). The replay links point at Valve's own servers over plain HTTP, which is why browsers call them unsafe.
 
-Needs: Steam with CS2, `uv`, `ffmpeg` (with NVENC for the default encoder), `g++`, `git`.
-
-```sh
-./setup.sh "/path/on/a/big/disk/cs2-highlights"
-```
-
-All heavy data lives in that folder, which is reached through `~/.local/share/cs2hl`: venv, plugin build, temporary frames and finished videos. `cs2hl` gets linked into `~/.local/bin`. The repo gets `workspace`, `clips`, `montages` and `replays` symlinks.
-
-## Use
-
-Download a match in CS2 (Watch → Your Matches → download), or drop any `.dem` into the replays folder. Then run:
+## Command line
 
 ```sh
-cs2hl list               # show detected highlights, no rendering
-cs2hl run                # render every demo not processed yet
-cs2hl run --mode blur60  # motion-blur variant (240 fps blended to 60)
-cs2hl watch              # keep running and render new demos as they appear
-cs2hl clean              # undo the CS2 plugin install after a hard interruption
+cs2hl               # open the app
+cs2hl latest        # render your latest Steam match
+cs2hl run [demo…]   # render new demos in the CS2 replays folder (or the given files)
+cs2hl list [demo…]  # show detected highlights without rendering
+cs2hl watch         # keep running, render demos as they appear in the replays folder
+cs2hl clean         # remove the plugin from CS2 after a crash
+cs2hl config        # print settings
 ```
 
-Rendering runs at about 12 frames per second, so a match with four highlights takes roughly 15 minutes in `smooth120` and about twice that in `blur60`. While rendering, CS2 opens and closes by itself. Leave it alone. The watcher waits whenever you are playing.
-
-To start the watcher automatically when you log in:
+Settings live in `~/.local/share/cs2hl/config.toml`. The GUI writes this file; you can also edit it by hand. To run the watcher at login:
 
 ```sh
 mkdir -p ~/.config/systemd/user && cp systemd/cs2hl-watch.service ~/.config/systemd/user/
 systemctl --user enable --now cs2hl-watch
 ```
 
-## Modes
+## Development
 
-| mode | render | output | look |
-|---|---|---|---|
-| `smooth120` (default) | 120 fps | 1080p120 | crisp, smooth |
-| `blur60` | 240 fps | 1080p60 | 4 frames blended per output frame, cinematic motion blur |
-
-## Crosshair
-
-Clips use **donk's crosshair** by default: classic static, tiny, cyan. Set `crosshair` in the config to change it:
-
-- `"donk"`: default preset
-- `"mine"`: your own crosshair from your CS2 settings
-- `"player"`: whatever the demo shows. The observer crosshair only keeps colors in current CS2.
-- a table of CS2 crosshair convars:
-
-```toml
-[crosshair]
-cl_crosshairstyle = 4
-cl_crosshair_length = 3
-cl_crosshair_gap = 0
-cl_crosshair_thickness = 1
-cl_crosshaircolor_r = 0
-cl_crosshaircolor_g = 255
-cl_crosshaircolor_b = 0
+```sh
+~/.local/share/cs2hl/venv/bin/python -m unittest discover -s tests
 ```
-
-Since 2026, CS2's crosshair uses pixel convars (`cl_crosshair_length/gap/thickness`), and `apply_crosshair_code` no longer has any effect, so share codes can't be used.
-
-Anything the recording session changes is set back to your saved values before CS2 quits: volume, HUD toggles, X-ray, crosshair. Your real config stays untouched.
-
-## Config
-
-Optional `~/.local/share/cs2hl/config.toml`. Any field of `cs2hl/config.py:Config` can be set, for example:
-
-```toml
-mode = "blur60"
-min_kills = 4
-pre_seconds = 4.0
-steamids = ["7656119..."]   # default: every account in Steam's loginusers.vdf
-```
-
-`cs2hl config` prints the effective settings.
-
-## Output
-
-- `clips/<date>_<map>_<id>/r03_4k_deagle.mp4`: one file per highlight, named by round, kills and weapon
-- `montages/<date>_<map>_<id>.mp4`: every highlight of the match in order
-
-Processed demos are tracked in `~/.local/share/cs2hl/state.json`. Use `run --force` to redo them.

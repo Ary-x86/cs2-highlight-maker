@@ -1,11 +1,10 @@
+workspace
+videos
+replays
 __pycache__/
 *.pyc
 .venv/
 config.toml
 *.dem
 *.mp4
-workspace
-clips
-montages
-replays
 *.egg-info/
