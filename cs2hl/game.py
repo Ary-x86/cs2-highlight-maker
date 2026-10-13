@@ -17,8 +17,10 @@ from pathlib import Path
 
 from . import usercfg
 from .config import STEAM_ROOT
+from .errors import FriendlyError
 
 SETUP_TICK = 96  # first tick where the plugin runs actions after a seek to tick 0
+GAMEINFO_SEARCH_PATH = "Game\tcsgo"
 SESSION_COMMANDS = (
     "sv_cheats 1",
     "volume 1",
@@ -36,6 +38,7 @@ SESSION_COMMANDS = (
 )
 # Convars set during recording besides SESSION_COMMANDS (crosshair ones are matched by prefix).
 EXTRA_TOUCHED = ("spec_show_xray", "mp_display_kill_assists", "cl_show_observer_crosshair")
+
 # Crosshair presets in CS2's pixel-based crosshair convars (apply_crosshair_code no longer changes them).
 CROSSHAIRS = {
     # donk (Team Spirit), August 2026: classic static, size 1, gap -4.5, thickness 1, cyan, no outline,
@@ -52,10 +55,27 @@ CROSSHAIRS = {
         "cl_crosshaircolor_g": 255,
         "cl_crosshaircolor_b": 255,
         "cl_crosshaircolor_a": 255,
-        "cl_crosshair_recoil": 0,
+    },
+    # White four lines with a centre dot and a black outline.
+    "classic": {
+        "cl_crosshairstyle": 2,
+        "cl_crosshairdot": 1,
+        "cl_crosshair_t": 0,
+        "cl_crosshair_length": 8,
+        "cl_crosshair_gap": 4,
+        "cl_crosshair_thickness": 2,
+        "cl_crosshair_drawoutline": 1,
+        "cl_crosshaircolor_r": 255,
+        "cl_crosshaircolor_g": 255,
+        "cl_crosshaircolor_b": 255,
+        "cl_crosshaircolor_a": 255,
     },
 }
-GAMEINFO_SEARCH_PATH = "Game\tcsgo"
+# Outline colour and recoil-follow are fixed: black outline, static crosshair.
+CROSSHAIR_FIXED = {"cl_crosshairoutline_r": 0, "cl_crosshairoutline_g": 0, "cl_crosshairoutline_b": 0,
+                   "cl_crosshairoutline_a": 255, "cl_crosshair_recoil": 0}
+
+PLUGIN_HOOK_TIMEOUT = 240  # seconds to wait for the plugin to report it is driving playback
 
 
 @dataclass
@@ -64,6 +84,12 @@ class Clip:
     start_tick: int
     end_tick: int
     player_slot: int  # user_id + 1 of the player to spectate
+
+
+def crosshair_cvars(crosshair: str, custom: dict | None = None) -> dict:
+    cvars = dict(custom or {}) if crosshair == "custom" else dict(CROSSHAIRS[crosshair])
+    cvars.update(CROSSHAIR_FIXED)
+    return cvars
 
 
 class Cs2:
@@ -85,6 +111,9 @@ class Cs2:
     # --- plugin install -------------------------------------------------------------------------
 
     def install(self) -> None:
+        if not self.plugin_so.exists():
+            raise FriendlyError("Recording plugin is missing", f"{self.plugin_so} does not exist.",
+                                "Run ./install.sh again (it builds the plugin), or plugin/build.sh.")
         self.uninstall()
         bin_dir = self.plugin_dir / "bin/linuxsteamrt64"
         bin_dir.mkdir(parents=True)
@@ -115,32 +144,20 @@ class Cs2:
     # --- actions file ---------------------------------------------------------------------------
 
     @staticmethod
-    def crosshair_commands(crosshair: str | dict) -> list[str]:
-        """"player": whatever the demo shows; "mine": your local crosshair; a preset name from CROSSHAIRS;
-        a {cvar: value} table; or a CSGO-... share code (best effort)."""
-        if crosshair == "player":
-            return []
-        cmds = ["cl_show_observer_crosshair 0"]  # draw the local crosshair instead of the spectated one
-        if crosshair == "mine":
-            return cmds
-        cvars = CROSSHAIRS.get(crosshair, crosshair) if isinstance(crosshair, str) else crosshair
-        if isinstance(cvars, dict):
-            cmds += [f"{name} {value}" for name, value in cvars.items()]
-        elif cvars.startswith("CSGO-"):
-            cmds.append(f"apply_crosshair_code {cvars}")
-        else:
-            raise ValueError(f"unknown crosshair {crosshair!r}; presets: {', '.join(CROSSHAIRS)}")
-        return cmds
+    def crosshair_commands(crosshair: str, custom: dict | None = None) -> list[str]:
+        """Force the local crosshair (the spectated player's own one only keeps its colours) and set it."""
+        cvars = crosshair_cvars(crosshair, custom)
+        return ["cl_show_observer_crosshair 0"] + [f"{name} {int(value)}" for name, value in cvars.items()]
 
     @staticmethod
-    def actions(clips: list[Clip], framerate: int, crosshair: str | dict = "donk", restore: list[str] = (),
-                tickrate: int = 64) -> list[dict]:
+    def actions(clips: list[Clip], framerate: int, crosshair: str = "donk", custom_crosshair: dict | None = None,
+                restore: list[str] = (), tickrate: int = 64) -> list[dict]:
         sequences = []
         for i, clip in enumerate(clips):
             setup = max(SETUP_TICK + 1, clip.start_tick - tickrate)
             acts = [(SETUP_TICK, c) for c in (
                 *SESSION_COMMANDS,
-                *Cs2.crosshair_commands(crosshair),
+                *Cs2.crosshair_commands(crosshair, custom_crosshair),
                 # Seek to just before the setup tick; seeking and spec_player on the same tick is unreliable.
                 f"demo_gototick {setup - 1}",
             )]
@@ -173,11 +190,29 @@ class Cs2:
             entry = lib / "steamapps/common/SteamLinuxRuntime_sniper/_v2-entry-point"
             if entry.exists():
                 return entry
-        raise SystemExit("SteamLinuxRuntime_sniper not found; install it from Steam (Tools)")
+        raise FriendlyError("Steam Linux Runtime (sniper) is missing", "CS2 runs inside it on Linux.",
+                            "In Steam, open Library → Tools and install 'Steam Linux Runtime 3.0 (sniper)'.")
+
+    def _frames_done(self) -> int:
+        count = 0
+        for take in self.raw_dir.iterdir() if self.raw_dir.exists() else ():
+            if take.is_dir():
+                count += sum(1 for e in os.scandir(take) if e.name.endswith(".jpg"))
+        return count
+
+    def _plugin_hooked(self) -> bool:
+        try:
+            return "Hooked FrameStageNotify" in self.plugin_log().read_text(errors="ignore")
+        except FileNotFoundError:
+            return False
 
     def record(self, demo: Path, clips: list[Clip], framerate: int, width: int, height: int,
-               timeout: float, crosshair: str | dict = "donk", log=print) -> None:
-        """Play demo, record every clip, return once the game has quit."""
+               timeout: float, crosshair: str = "donk", custom_crosshair: dict | None = None,
+               log=print, progress=None) -> None:
+        """Play demo, record every clip, return once the game has quit.
+
+        progress(frames_done, frames_total) is called every couple of seconds while recording.
+        """
         if " " in str(demo):
             raise ValueError("demo path must not contain spaces (CS2 splits +playdemo on them)")
         cfg_dir = usercfg.active_account_cfg_dir()
@@ -185,29 +220,47 @@ class Cs2:
         touched = [c.split()[0] for c in SESSION_COMMANDS] + list(EXTRA_TOUCHED)
         touched += [k for k in saved if k.startswith("cl_crosshair")]
         restore = usercfg.restore_commands(saved, touched)
-        cfg_backup = self.raw_dir / "cfg-backup"
+        cfg_backup = self.raw_dir.parent / "cfg-backup"
         usercfg.backup(cfg_dir, cfg_backup)
 
+        tickrate = 64
+        total = sum(round((c.end_tick - c.start_tick) / tickrate * framerate) for c in clips)
         actions_file = Path(str(demo) + ".json")
-        actions_file.write_text(json.dumps(self.actions(clips, framerate, crosshair, restore), indent=1))
+        actions_file.write_text(json.dumps(
+            self.actions(clips, framerate, crosshair, custom_crosshair, restore), indent=1))
         self.install()
+        self.plugin_log().unlink(missing_ok=True)
         cmd = [str(self._runtime_entry()), "--verb=waitforexitandrun", "--",
                str(self.cs2_dir / "game/cs2.sh"), "-insecure", "-novid", "-nojoy",
                "+playdemo", str(demo), "-width", str(width), "-height", str(height), "-sw"]
         env = dict(os.environ, SteamAppId="730", SteamGameId="730")
-        log(f"launching CS2 for {len(clips)} clip(s)")
-        # CS2 prints its console to stdout on Linux; keep it next to the frames for debugging.
+        log(f"Launching CS2 to record {len(clips)} take(s), {total} frames")
+        # CS2 prints its early console output to stdout on Linux; keep it for debugging.
         console = open(self.console_log(), "w")
         proc = subprocess.Popen(cmd, env=env, stdout=console, stderr=subprocess.STDOUT)
+        started = time.monotonic()
         try:
-            deadline = time.monotonic() + timeout
-            while proc.poll() is None:
-                if time.monotonic() > deadline:
-                    raise TimeoutError("CS2 did not finish recording in time")
+            deadline = started + timeout
+            hooked = False
+            while proc.poll() is None or self.is_running():
+                now = time.monotonic()
+                if now > deadline:
+                    raise FriendlyError(
+                        "CS2 took too long to record",
+                        f"Recording did not finish within {timeout / 60:.0f} minutes.",
+                        "Make sure nothing covers or minimises the CS2 window, then try again. "
+                        "Slow disks also slow down recording.")
+                if not hooked:
+                    hooked = self._plugin_hooked()
+                    if not hooked and now - started > PLUGIN_HOOK_TIMEOUT:
+                        raise FriendlyError(
+                            "The recording plugin did not start inside CS2",
+                            "A CS2 update probably changed the game internals the plugin relies on.",
+                            "Update this tool (git pull, then ./install.sh). If it still fails, check "
+                            "github.com/akiver/cs-demo-manager for a newer plugin.")
+                if progress:
+                    progress(self._frames_done(), total)
                 time.sleep(2)
-            # cs2.sh may exit before the game process itself is gone
-            while self.is_running() and time.monotonic() < deadline:
-                time.sleep(1)
         except BaseException:
             self.kill()
             usercfg.restore_backup(cfg_dir, cfg_backup)
@@ -216,6 +269,14 @@ class Cs2:
             console.close()
             self.uninstall()
             actions_file.unlink(missing_ok=True)
+        if progress:
+            progress(self._frames_done(), total)
+        if self._frames_done() == 0:
+            raise FriendlyError(
+                "CS2 closed without recording anything",
+                "The game quit or crashed before reaching the highlights.",
+                "Make sure Steam is running and you can open CS2 normally, then try again. "
+                f"Details: {self.plugin_log()}")
 
     @staticmethod
     def kill() -> None:

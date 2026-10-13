@@ -5,6 +5,7 @@ description = "Automatic CS2 highlight clips from demos, rendered frame-by-frame
 requires-python = ">=3.11"
 dependencies = [
     "demoparser2>=0.40",
+    "segno>=1.6",
 ]
 
 [project.scripts]
@@ -16,3 +17,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["cs2hl*"]
+
+[tool.setuptools.package-data]
+cs2hl = ["gui/static/*"]

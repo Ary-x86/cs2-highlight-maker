@@ -13,6 +13,10 @@ MULTIKILL_NAMES = {2: "2k", 3: "3k", 4: "4k", 5: "ace"}
 MULTIKILL_SCORE = {3: 3.0, 4: 5.0, 5: 8.0}
 
 
+class NotYourMatch(ValueError):
+    """None of the given accounts played in the demo."""
+
+
 @dataclass
 class Kill:
     tick: int
@@ -104,7 +108,7 @@ def analyze(demo: Path, steamids: list[str], *, min_kills: int = 3, clutch_min_e
     present = set(players["steamid"].astype(str))
     pov = next((s for s in steamids if s in present), None)
     if pov is None:
-        raise ValueError(f"none of {steamids} played in {demo.name}")
+        raise NotYourMatch(f"none of {steamids} played in {demo.name}")
     pov_name = str(players.loc[players["steamid"].astype(str) == pov, "name"].iloc[0])
 
     tickrate = 64

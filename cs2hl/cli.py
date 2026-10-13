@@ -9,8 +9,8 @@ from pathlib import Path
 
 from . import config, pipeline
 from .config import MODES, PLUGIN_SO
+from .errors import FriendlyError, explain
 from .game import Cs2
-from .pipeline import log
 
 
 def _demos(cfg: config.Config, paths: list[str], only_pending: bool) -> list[Path]:
@@ -19,11 +19,17 @@ def _demos(cfg: config.Config, paths: list[str], only_pending: bool) -> list[Pat
     return pipeline.pending_demos(cfg) if only_pending else sorted(cfg.replays_dir.glob("*.dem"))
 
 
+def cmd_gui(cfg, args) -> int:
+    from .gui.server import serve
+    serve(open_window=not args.no_window, port=args.port)
+    return 0
+
+
 def cmd_list(cfg, args) -> int:
     for demo in _demos(cfg, args.demos, only_pending=False):
         try:
             info = pipeline.analyze(cfg, demo)
-        except ValueError as e:
+        except Exception as e:  # not ours / unreadable: report and keep listing
             print(f"{demo.name}: skipped ({e})")
             continue
         print(f"{demo.name}: {info.map_name}, POV {info.pov_name}")
@@ -38,20 +44,26 @@ def cmd_list(cfg, args) -> int:
 def cmd_run(cfg, args) -> int:
     demos = _demos(cfg, args.demos, only_pending=not args.force)
     if not demos:
-        log("nothing to do")
+        print("nothing to do")
         return 0
     failed = 0
     for demo in demos:
         try:
-            pipeline.process(cfg, demo, args.mode)
-        except Exception as e:  # keep going with the other demos
+            pipeline.process(cfg, demo, mode=args.mode)
+        except FriendlyError as e:
             failed += 1
-            log(f"FAILED {demo.name}: {e}")
+            print(f"\n{demo.name}: {e}\n", file=sys.stderr)
     return 1 if failed else 0
 
 
+def cmd_latest(cfg, args) -> int:
+    from . import jobs
+    jobs.render_match(None, args.mode)(pipeline.Reporter())
+    return 0
+
+
 def cmd_watch(cfg, args) -> int:
-    log(f"watching {cfg.replays_dir} (mode {args.mode or cfg.mode})")
+    print(f"watching {cfg.replays_dir} (mode {args.mode or cfg.mode})")
     seen_size: dict[Path, int] = {}
     while True:
         for demo in pipeline.pending_demos(cfg):
@@ -61,12 +73,10 @@ def cmd_watch(cfg, args) -> int:
                 seen_size[demo] = size
                 continue
             try:
-                pipeline.process(cfg, demo, args.mode)
-            except Exception as e:
-                log(f"FAILED {demo.name}: {e}")
-                state = pipeline.load_state()
-                state[pipeline.demo_key(demo)] = {"error": str(e)}
-                pipeline.save_state(state)
+                pipeline.process(cfg, demo, mode=args.mode)
+            except FriendlyError as e:
+                print(f"\n{demo.name}: {e}\n", file=sys.stderr)
+                pipeline.mark(pipeline.demo_key(demo), error=e.title)
         time.sleep(args.interval)
 
 
@@ -75,35 +85,45 @@ def cmd_clean(cfg, args) -> int:
     if Cs2.is_running():
         print("CS2 is running; close it first")
         return 1
-    Cs2(cfg.cs2_dir, PLUGIN_SO, config.WORK_DIR / "tmp/raw").uninstall()
+    Cs2(cfg.cs2_path, PLUGIN_SO, config.WORK_DIR / "tmp/raw").uninstall()
     print("plugin removed, gameinfo.gi restored")
     return 0
 
 
 def cmd_config(cfg, args) -> int:
     print(f"config file: {config.CONFIG_PATH} ({'exists' if config.CONFIG_PATH.exists() else 'defaults'})")
-    for key, value in vars(cfg).items():
+    for key, value in cfg.to_dict().items():
         print(f"  {key} = {value!r}")
-    print(f"  replays_dir -> {cfg.replays_dir}")
-    print(f"plugin: {PLUGIN_SO} ({'ok' if PLUGIN_SO.exists() else 'MISSING, run plugin/build.sh'})")
+    print(f"  -> CS2: {cfg.cs2_path}")
+    print(f"  -> clips: {cfg.clips_dir}  montages: {cfg.montages_dir}")
+    print(f"plugin: {PLUGIN_SO} ({'ok' if PLUGIN_SO.exists() else 'MISSING, run ./install.sh'})")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cs2hl", description="Automatic CS2 highlight clips from demos")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
+
+    p = sub.add_parser("gui", help="open the graphical interface (default)")
+    p.add_argument("--no-window", action="store_true", help="only start the server, print its URL")
+    p.add_argument("--port", type=int, default=0)
+    p.set_defaults(func=cmd_gui)
 
     p = sub.add_parser("list", help="show detected highlights without rendering")
     p.add_argument("demos", nargs="*", help="demo files (default: all in the replays folder)")
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("run", help="render highlights for new demos (or the given ones)")
+    p = sub.add_parser("run", help="render highlights for new local demos (or the given ones)")
     p.add_argument("demos", nargs="*")
     p.add_argument("--mode", choices=list(MODES), help="smooth120 (default) or blur60 motion blur")
     p.add_argument("--force", action="store_true", help="also redo demos that were already processed")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("watch", help="keep running and process demos as they appear")
+    p = sub.add_parser("latest", help="download your latest match from Steam and render it")
+    p.add_argument("--mode", choices=list(MODES))
+    p.set_defaults(func=cmd_latest)
+
+    p = sub.add_parser("watch", help="keep running and process demos as they appear in the replays folder")
     p.add_argument("--mode", choices=list(MODES))
     p.add_argument("--interval", type=int, default=30, help="seconds between folder scans")
     p.set_defaults(func=cmd_watch)
@@ -112,11 +132,16 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("config", help="print effective settings").set_defaults(func=cmd_config)
 
     args = parser.parse_args(argv)
-    cfg = config.load()
+    if args.command is None:
+        args = parser.parse_args(["gui", *(argv or [])])
     try:
+        cfg = config.load()
         return args.func(cfg, args)
     except KeyboardInterrupt:
         return 130
+    except Exception as e:  # noqa: BLE001 - show every failure the friendly way
+        print(f"\n{explain(e)}\n", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

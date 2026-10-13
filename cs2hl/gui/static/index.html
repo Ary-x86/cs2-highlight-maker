@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS2 Highlight Maker</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand"><img src="icon.svg" alt=""><div><b>CS2 Highlight</b><span>Maker</span></div></div>
+  <nav>
+    <button data-page="home" class="active">🎬 Highlights</button>
+    <button data-page="videos">📁 My videos</button>
+    <button data-page="settings">⚙️ Settings</button>
+    <button data-page="steam">🔑 Steam account</button>
+    <button data-page="help">❓ Help</button>
+  </nav>
+  <div class="chips" id="chips"></div>
+</aside>
+
+<main>
+  <!-- HIGHLIGHTS -->
+  <section id="page-home" class="page active">
+    <header class="page-head">
+      <div><h1>Make highlights</h1><p class="muted">Pick a match. The app finds your multi-kills and clutches, records them inside CS2 and builds a montage.</p></div>
+      <div class="seg" id="mode-toggle" title="Video style (explained in Settings and Help)">
+        <button data-mode="smooth120">Smooth · 120 fps</button>
+        <button data-mode="blur60">Motion blur · 60 fps</button>
+      </div>
+    </header>
+
+    <div class="card hero">
+      <div>
+        <h2>Latest match</h2>
+        <p class="muted" id="latest-hint">Downloads your newest Premier / Competitive / Wingman replay from Steam, renders it, then deletes the replay.</p>
+      </div>
+      <button class="btn primary big" id="btn-latest">⚡ Make highlights of my latest match</button>
+    </div>
+
+    <div class="card job hidden" id="job">
+      <div class="job-head">
+        <div><span class="badge" id="job-status"></span> <b id="job-title"></b></div>
+        <div class="job-actions"><span class="muted" id="job-elapsed"></span><button class="btn small danger" id="job-cancel">Cancel</button></div>
+      </div>
+      <div class="stage" id="job-stage"></div>
+      <div class="bar"><div id="job-bar"></div></div>
+      <div class="muted small" id="job-detail"></div>
+      <div class="error-card hidden" id="job-error"></div>
+      <div class="results hidden" id="job-results"></div>
+      <details id="job-log-wrap" open><summary>Log</summary><pre id="job-log"></pre></details>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button data-tab="steam" class="active">Steam matches</button>
+        <button data-tab="local">Demos on this PC</button>
+        <div class="spacer"></div>
+        <button class="btn small" id="btn-refresh">↻ Refresh</button>
+      </div>
+      <div id="tab-steam" class="tab active">
+        <div id="steam-list" class="list"></div>
+        <div class="center"><button class="btn small hidden" id="btn-more">Load older matches</button></div>
+      </div>
+      <div id="tab-local" class="tab">
+        <p class="muted small">Demos in <code id="replays-dir"></code>, e.g. ones you downloaded inside CS2 (Watch → Your Matches) or FACEIT demos you dropped there.</p>
+        <div id="local-list" class="list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIDEOS -->
+  <section id="page-videos" class="page">
+    <header class="page-head"><div><h1>My videos</h1><p class="muted">Clips and montages you made. Saved in <code id="out-dir"></code></p></div>
+      <button class="btn" id="btn-open-out">Open folder</button></header>
+    <div id="videos-list" class="list"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="page-settings" class="page">
+    <header class="page-head"><div><h1>Settings</h1><p class="muted">Changes save automatically.</p></div></header>
+
+    <div class="card">
+      <h2>Video style</h2>
+      <div class="choices" id="mode-cards">
+        <label class="choice" data-mode="smooth120">
+          <input type="radio" name="mode" value="smooth120">
+          <b>Smooth · 120 fps</b>
+          <p>Every frame is a real game frame: crisp and very smooth, great for slowing down in an editor. Fastest to make.</p>
+        </label>
+        <label class="choice" data-mode="blur60">
+          <input type="radio" name="mode" value="blur60">
+          <b>Motion blur · 60 fps</b>
+          <p>CS2 renders 240 fps and every 4 frames are blended into one. Fast flicks get the soft, cinematic blur of frag movies. Takes about twice as long.</p>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Crosshair</h2>
+      <p class="muted">Used in the recorded clips. Your own CS2 settings are left untouched.</p>
+      <div class="choices three" id="xhair-cards">
+        <label class="choice" data-xhair="donk"><input type="radio" name="crosshair" value="donk"><canvas width="160" height="110"></canvas><b>donk</b><p>Tiny cyan static cross, as used by donk (Team Spirit).</p></label>
+        <label class="choice" data-xhair="classic"><input type="radio" name="crosshair" value="classic"><canvas width="160" height="110"></canvas><b>Classic</b><p>White four lines with a centre dot and outline.</p></label>
+        <label class="choice" data-xhair="custom"><input type="radio" name="crosshair" value="custom"><canvas width="160" height="110"></canvas><b>Custom</b><p>Build your own below.</p></label>
+      </div>
+      <div class="xhair-editor" id="xhair-editor">
+        <div class="grid2">
+          <label>Length <input type="range" min="0" max="20" data-cv="cl_crosshair_length"><span></span></label>
+          <label>Gap <input type="range" min="-5" max="20" data-cv="cl_crosshair_gap"><span></span></label>
+          <label>Thickness <input type="range" min="1" max="8" data-cv="cl_crosshair_thickness"><span></span></label>
+          <label>Opacity <input type="range" min="30" max="255" data-cv="cl_crosshaircolor_a"><span></span></label>
+          <label>Color <input type="color" id="xhair-color"></label>
+          <div class="checks">
+            <label><input type="checkbox" data-cv="cl_crosshairdot"> Centre dot</label>
+            <label><input type="checkbox" data-cv="cl_crosshair_drawoutline"> Outline</label>
+            <label><input type="checkbox" data-cv="cl_crosshair_t"> T-style (no top line)</label>
+          </div>
+        </div>
+        <canvas id="xhair-big" width="320" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Folders</h2>
+      <label class="field">Counter-Strike 2 folder
+        <div class="row">
+          <select id="cs2-select"></select>
+          <button class="btn small" id="cs2-browse">Browse…</button>
+        </div>
+        <span class="muted small" id="cs2-hint"></span>
+      </label>
+      <label class="field">Save videos to
+        <div class="row">
+          <input type="text" id="output-dir" placeholder="default: workspace folder">
+          <button class="btn small" id="out-browse">Browse…</button>
+        </div>
+        <span class="muted small">Clips go in <code>clips/</code> and montages in <code>montages/</code> inside this folder.</span>
+      </label>
+      <label class="check"><input type="checkbox" id="keep-demos"> Keep demos downloaded from Steam (otherwise they're deleted after rendering, ~200 MB each)</label>
+    </div>
+
+    <div class="card">
+      <h2>What counts as a highlight</h2>
+      <div class="grid3">
+        <label class="field">Kills in a round <select id="min-kills"><option value="2">2 or more</option><option value="3">3 or more</option><option value="4">4 or more</option><option value="5">Aces only</option></select></label>
+        <label class="field">Won clutches <select id="clutch-min"><option value="1">1v1 and up</option><option value="2">1v2 and up</option><option value="3">1v3 and up</option><option value="99">Ignore clutches</option></select></label>
+        <label class="field">Seconds before first kill <input type="number" id="pre-seconds" min="0" max="15" step="0.5"></label>
+        <label class="field">Seconds after last kill <input type="number" id="post-seconds" min="0" max="15" step="0.5"></label>
+        <label class="field">Cut pauses longer than (s) <input type="number" id="max-gap" min="2" max="60" step="1"></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Quality</h2>
+      <div class="grid3">
+        <label class="field">Resolution <select id="resolution"><option value="1280x720">1280 × 720</option><option value="1920x1080">1920 × 1080</option><option value="2560x1440">2560 × 1440</option></select></label>
+        <label class="field">Encoder <select id="codec"><option value="h264_nvenc">NVIDIA GPU (fast)</option><option value="libx264">CPU (works everywhere)</option></select></label>
+        <label class="field">Quality <input type="range" id="quality" min="16" max="30"><span class="muted small" id="quality-label"></span></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Accounts</h2>
+      <p class="muted small">You are recognised in a demo by your Steam account. By default every account that has logged in on this PC counts:</p>
+      <div id="accounts"></div>
+      <label class="field">Extra SteamID64s (comma separated, optional; replaces the list above)
+        <input type="text" id="steamids" placeholder="7656119…">
+      </label>
+    </div>
+  </section>
+
+  <!-- STEAM -->
+  <section id="page-steam" class="page">
+    <header class="page-head"><div><h1>Steam account</h1><p class="muted">Needed to list your matches and download their replays.</p></div></header>
+    <div class="card" id="steam-logged-in">
+      <h2>Logged in as <span id="steam-name"></span></h2>
+      <p class="muted">Your login is stored only on this PC (<code>steam_session.json</code> in the workspace folder, readable only by you) and is used only to read your match history on steamcommunity.com.</p>
+      <button class="btn danger" id="btn-logout">Log out</button>
+    </div>
+    <div class="grid2 hidden" id="steam-login">
+      <div class="card">
+        <h2>Scan with the Steam app</h2>
+        <p class="muted">Open the Steam app on your phone → Steam Guard → scan this code. Recommended.</p>
+        <div id="qr-box" class="qr"><button class="btn primary" id="btn-qr">Show QR code</button></div>
+      </div>
+      <div class="card">
+        <h2>Or use your password</h2>
+        <form id="pw-form">
+          <label class="field">Steam login name<input type="text" id="pw-account" autocomplete="username"></label>
+          <label class="field">Password<input type="password" id="pw-password" autocomplete="current-password"></label>
+          <button class="btn primary" type="submit">Log in</button>
+        </form>
+        <form id="code-form" class="hidden">
+          <p id="code-hint"></p>
+          <label class="field">Steam Guard code<input type="text" id="guard-code" autocomplete="one-time-code" maxlength="8"></label>
+          <button class="btn primary" type="submit">Submit code</button>
+        </form>
+        <p class="muted small">Your password is sent straight to Steam (encrypted with Steam's key), never stored.</p>
+      </div>
+    </div>
+    <div class="error-card hidden" id="login-error"></div>
+  </section>
+
+  <!-- HELP -->
+  <section id="page-help" class="page">
+    <header class="page-head"><div><h1>Help</h1></div></header>
+    <div class="card prose">
+      <h2>How it works</h2>
+      <ol>
+        <li><b>Find</b>: the demo (replay) is analysed for rounds where you got enough kills or won a clutch.</li>
+        <li><b>Record</b>: CS2 opens by itself, jumps to each highlight, spectates you and saves every frame at a fixed frame rate. This is not screen recording, so the result is perfectly smooth even if your PC stutters. Don't click into the CS2 window while it works; it closes when done.</li>
+        <li><b>Encode</b>: the frames become one MP4 per highlight, plus a montage of the whole match.</li>
+      </ol>
+      <h2>Video styles</h2>
+      <p><b>Smooth · 120 fps</b>: every output frame is a real game frame. Crisp, smooth, and can be slowed down 2× in an editor without stutter.</p>
+      <p><b>Motion blur · 60 fps</b>: CS2 renders 4× more frames (240 per second), and each group of 4 is averaged into one. Fast movement smears naturally like a real camera, the look of most frag movies. It takes about twice as long.</p>
+      <h2>How long does it take?</h2>
+      <p>CS2 saves roughly 10–15 frames per second while recording, so a match with four highlights takes about 15 minutes (Smooth) or 30 minutes (Motion blur). The progress bar shows the time left.</p>
+      <h2>Where do matches come from?</h2>
+      <p><b>Steam matches</b> come from your Steam "Personal Game Data" pages, the same ones with the <i>Download Replay</i> buttons. Replays are downloaded from Valve's replay servers. Those links are plain HTTP, which is why browsers call them unsafe; the files come straight from Valve. Valve deletes replays after a few weeks, so old matches show as expired.</p>
+      <p><b>Demos on this PC</b> are <code>.dem</code> files in your CS2 <code>replays</code> folder (in-game downloads, or any demo you copy there).</p>
+      <h2>Troubleshooting</h2>
+      <dl>
+        <dt>"The recording plugin did not start inside CS2"</dt><dd>A CS2 update changed something the plugin depends on. Update this app (<code>git pull</code> then <code>./install.sh</code>).</dd>
+        <dt>CS2 opens but nothing happens / the game stays open</dt><dd>Use Cancel, then try again. If it keeps happening, run <code>cs2hl clean</code> in a terminal to remove the plugin from CS2.</dd>
+        <dt>"You are not in this demo"</dt><dd>Only your own matches can be clipped. If you play on an account that never logged in on this PC, add its SteamID64 in Settings → Accounts.</dd>
+        <dt>"Not enough disk space"</dt><dd>Frames are stored temporarily in the workspace folder. Free space there, or reinstall with the workspace on a bigger disk.</dd>
+        <dt>NVIDIA encoder errors</dt><dd>Switch Encoder to CPU in Settings. It is slower but works on any PC.</dd>
+        <dt>Steam login expired</dt><dd>Log in again on the Steam account page.</dd>
+      </dl>
+      <h2>Command line</h2>
+      <pre>cs2hl            # open this window
+cs2hl latest     # render your latest Steam match
+cs2hl run        # render new demos in the replays folder
+cs2hl list       # show highlights without rendering
+cs2hl clean      # remove the CS2 plugin after a crash</pre>
+      <p class="muted small">Workspace: <code id="work-dir"></code></p>
+    </div>
+  </section>
+</main>
+
+<dialog id="picker">
+  <div class="picker-head"><b id="picker-title">Choose a folder</b><button class="btn small" id="picker-close">✕</button></div>
+  <div class="row"><input type="text" id="picker-path"><button class="btn small" id="picker-go">Go</button></div>
+  <div class="picker-roots" id="picker-roots"></div>
+  <div class="picker-list" id="picker-list"></div>
+  <div class="picker-foot"><span class="muted small" id="picker-note"></span><button class="btn primary" id="picker-ok">Use this folder</button></div>
+</dialog>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
