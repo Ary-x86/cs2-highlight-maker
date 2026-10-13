@@ -129,7 +129,8 @@ def process(cfg: Config, demo: Path, mode: str | None = None) -> list[Path]:
     started = time.monotonic()
     # Rendering runs well above 20 fps on any GPU that plays CS2; the margin covers seeks and loading.
     timeout = cfg.launch_timeout + frames / 20 + 30 * len(clips)
-    game.record(playable_link(demo), clips, spec["render_fps"], cfg.width, cfg.height, timeout, log=log)
+    game.record(playable_link(demo), clips, spec["render_fps"], cfg.width, cfg.height, timeout,
+                crosshair=cfg.crosshair, log=log)
     log(f"recorded {len(clips)} take(s) in {time.monotonic() - started:.0f}s")
 
     out_dir = CLIPS_DIR / match_folder(info)

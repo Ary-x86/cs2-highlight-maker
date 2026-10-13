@@ -48,6 +48,30 @@ systemctl --user enable --now cs2hl-watch
 | `smooth120` (default) | 120 fps | 1080p120 | crisp, smooth |
 | `blur60` | 240 fps | 1080p60 | 4 frames blended per output frame, cinematic motion blur |
 
+## Crosshair
+
+Clips use **donk's crosshair** by default: classic static, tiny, cyan. Set `crosshair` in the config to change it:
+
+- `"donk"`: default preset
+- `"mine"`: your own crosshair from your CS2 settings
+- `"player"`: whatever the demo shows. The observer crosshair only keeps colors in current CS2.
+- a table of CS2 crosshair convars:
+
+```toml
+[crosshair]
+cl_crosshairstyle = 4
+cl_crosshair_length = 3
+cl_crosshair_gap = 0
+cl_crosshair_thickness = 1
+cl_crosshaircolor_r = 0
+cl_crosshaircolor_g = 255
+cl_crosshaircolor_b = 0
+```
+
+Since 2026, CS2's crosshair uses pixel convars (`cl_crosshair_length/gap/thickness`), and `apply_crosshair_code` no longer has any effect, so share codes can't be used.
+
+Anything the recording session changes is set back to your saved values before CS2 quits: volume, HUD toggles, X-ray, crosshair. Your real config stays untouched.
+
 ## Config
 
 Optional `~/.local/share/cs2hl/config.toml`. Any field of `cs2hl/config.py:Config` can be set, for example:

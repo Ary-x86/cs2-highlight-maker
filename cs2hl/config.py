@@ -31,6 +31,9 @@ class Config:
     mode: str = "smooth120"
     width: int = 1920
     height: int = 1080
+    # "donk" (default), "mine" (your own crosshair), "player" (whatever the demo shows),
+    # or a table of crosshair convars, e.g. {cl_crosshair_length = 3, cl_crosshair_gap = 0}
+    crosshair: str | dict = "donk"
     # Highlight rules
     min_kills: int = 3
     clutch_min_enemies: int = 2
@@ -41,7 +44,7 @@ class Config:
     launch_timeout: int = 300
     # Encoder
     video_codec: str = "h264_nvenc"
-    quality: int = 19
+    quality: int = 23  # NVENC CQ / x264 CRF; lower = bigger, sharper
 
     @property
     def replays_dir(self) -> Path:

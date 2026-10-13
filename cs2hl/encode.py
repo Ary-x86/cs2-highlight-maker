@@ -19,6 +19,7 @@ def find_take(raw_dir: Path, name: str) -> Path:
 def _encoder_args(codec: str, quality: int) -> list[str]:
     if codec.endswith("_nvenc"):
         return ["-c:v", codec, "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", str(quality), "-b:v", "0",
+                "-maxrate", "60M", "-bufsize", "120M",
                 "-pix_fmt", "yuv420p"]
     return ["-c:v", codec, "-preset", "medium", "-crf", str(quality), "-pix_fmt", "yuv420p"]
 

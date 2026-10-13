@@ -1,5 +1,5 @@
 diff --git a/cs2-server-plugin/cs2-server-plugin/main.cpp b/cs2-server-plugin/cs2-server-plugin/main.cpp
-index 0858843..9c5fb51 100644
+index 0858843..65b0384 100644
 --- a/cs2-server-plugin/cs2-server-plugin/main.cpp
 +++ b/cs2-server-plugin/cs2-server-plugin/main.cpp
 @@ -75,6 +75,7 @@ ISource2Client* client = NULL;
@@ -136,3 +136,34 @@ index 0858843..9c5fb51 100644
  
      originalClientFullyConnect(thisptr, playerSlot);
  }
+@@ -652,6 +713,30 @@ EXPORT void* CreateInterface(const char* pName, int* pReturnCode)
+     return original;
+ }
+ 
++// Logs every command and convar whose name contains the argument, with current values, to csdm.log.
++CON_COMMAND(csdm_find, "Logs commands and convars matching a substring")
++{
++    if (args.ArgC() < 2 || g_pCVar == NULL) {
++        return;
++    }
++    const char* needle = args.Arg(1);
++
++    ConCommandData* data = g_pCVar->GetConCommandData(ConCommandRef());
++    for (ConCommandRef concmd = ConCommandRef((uint16)0); concmd.GetRawData() != data; concmd = ConCommandRef(concmd.GetAccessIndex() + 1))
++    {
++        if (strstr(concmd.GetName(), needle) != NULL) {
++            Log("cmd %s", concmd.GetName());
++        }
++    }
++
++    for (ConVarRefAbstract ref(ConVarRef((uint16)0)); ref.IsValidRef(); ref = ConVarRefAbstract(ConVarRef(ref.GetAccessIndex() + 1)))
++    {
++        if (strstr(ref.GetName(), needle) != NULL) {
++            Log("cvar %s = %s", ref.GetName(), ref.GetString().Get());
++        }
++    }
++}
++
+ CON_COMMAND(csdm_info, "Prints CS:DM plugin info")
+ {
+     Log("Tick: %d", currentTick.load());
