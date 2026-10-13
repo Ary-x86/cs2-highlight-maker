@@ -5,6 +5,7 @@ Every API call must carry the random per-launch token, so other websites open in
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import mimetypes
 import os
@@ -316,7 +317,8 @@ def make_handler(app: App):
             if kind == "latest":
                 job = app.runner.submit("Latest match", jobs.render_match(None, mode))
             elif kind == "match":
-                match = steam.Match(**body["match"])
+                known = {f.name for f in dataclasses.fields(steam.Match)}
+                match = steam.Match(**{k: v for k, v in body["match"].items() if k in known})
                 job = app.runner.submit(f"{match.mode} {match.map} ({match.time[:10]})",
                                         jobs.render_match(match, mode))
             elif kind == "local":
