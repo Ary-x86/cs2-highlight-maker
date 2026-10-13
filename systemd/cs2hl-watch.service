@@ -1,0 +1,11 @@
+[Unit]
+Description=Render CS2 highlight clips from new demos
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/cs2hl watch
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=graphical-session.target
