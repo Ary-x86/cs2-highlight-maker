@@ -32,7 +32,7 @@ cs2hl watch              # keep running and render new demos as they appear
 cs2hl clean              # undo the CS2 plugin install after a hard interruption
 ```
 
-While rendering, CS2 opens and closes by itself. Leave it alone. The watcher waits whenever you are playing.
+Rendering runs at about 12 frames per second, so a match with four highlights takes roughly 15 minutes in `smooth120` and about twice that in `blur60`. While rendering, CS2 opens and closes by itself. Leave it alone. The watcher waits whenever you are playing.
 
 To start the watcher automatically when you log in:
 
