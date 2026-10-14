@@ -67,7 +67,7 @@ class App:
         vdf = STEAM_ROOT / "config/loginusers.vdf"
         if not vdf.exists():
             return {}
-        text = vdf.read_text(errors="ignore")
+        text = vdf.read_text(encoding="utf-8", errors="ignore")
         return {sid: (re.search(r'"PersonaName"\s+"([^"]*)"', body) or [None, sid])[1]
                 for sid, body in re.findall(r'"(7656\d{13})"\s*\{([^}]*)\}', text)}
 
@@ -471,7 +471,7 @@ def _open_window(url: str) -> None:
 def _running_instance() -> str | None:
     """URL of an already running app, so a second launch just opens another window onto the same queue."""
     try:
-        info = json.loads(INSTANCE_PATH.read_text())
+        info = json.loads(INSTANCE_PATH.read_text(encoding="utf-8"))
         req = urllib.request.Request(f"http://127.0.0.1:{info['port']}/api/queue", headers={"X-Token": info["token"]})
         with urllib.request.urlopen(req, timeout=2):
             return f"http://127.0.0.1:{info['port']}/#token={info['token']}"
@@ -490,7 +490,7 @@ def serve(open_window: bool = True, port: int = 0) -> None:
     port = httpd.server_address[1]
     url = f"http://127.0.0.1:{port}/#token={app.token}"
     fd = os.open(INSTANCE_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"port": port, "token": app.token, "pid": os.getpid()}, f)
     print(f"CS2 Highlight Maker running at {url}", flush=True)
     print("Close the window to quit (it keeps running while the queue has work).", flush=True)

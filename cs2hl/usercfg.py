@@ -21,7 +21,7 @@ def active_account_cfg_dir() -> Path | None:
     vdf = STEAM_ROOT / "config/loginusers.vdf"
     if not vdf.exists():
         return None
-    text = vdf.read_text(errors="ignore")
+    text = vdf.read_text(encoding="utf-8", errors="ignore")
     best, best_time = None, -1
     for steamid, body in re.findall(r'"(7656\d{13})"\s*\{([^}]*)\}', text):
         # Key case varies between Steam versions ("MostRecent"/"Timestamp" vs "timestamp").
@@ -42,7 +42,7 @@ def read_convars(cfg_dir: Path | None) -> dict[str, str]:
     for name in CFG_FILES:
         path = cfg_dir / name
         if path.exists():
-            values.update(re.findall(r'^\s*"([^"]+)"\s+"([^"]*)"\s*$', path.read_text(errors="ignore"), re.M))
+            values.update(re.findall(r'^\s*"([^"]+)"\s+"([^"]*)"\s*$', path.read_text(encoding="utf-8", errors="ignore"), re.M))
     return values
 
 

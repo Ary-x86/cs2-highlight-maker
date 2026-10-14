@@ -50,7 +50,7 @@ _LINE = re.compile(r'^(\s*)"([^"]+)"(\s+)"([^"]*)"\s*$')
 
 def read(path: Path) -> dict[str, str]:
     values = {}
-    for line in path.read_text(errors="ignore").splitlines():
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         if m := _LINE.match(line):
             values[m.group(2)] = m.group(4)
     return values
@@ -66,7 +66,7 @@ def recording_changes(cfg_dir: Path | None, high_quality: bool) -> dict[str, str
 
 def write_values(path: Path, changes: dict[str, str]) -> None:
     """Set keys in a cs2_video.txt, keeping every other line as it is."""
-    lines = path.read_text(errors="ignore").splitlines() if path.exists() else ['"video.cfg"', "{", "}"]
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines() if path.exists() else ['"video.cfg"', "{", "}"]
     todo = dict(changes)
     for i, line in enumerate(lines):
         if (m := _LINE.match(line)) and m.group(2) in todo:
@@ -74,7 +74,7 @@ def write_values(path: Path, changes: dict[str, str]) -> None:
     if todo:
         close = max(i for i, line in enumerate(lines) if line.strip() == "}")
         lines[close:close] = [f'\t"{k}"\t\t"{v}"' for k, v in todo.items()]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class VideoSettings:
@@ -94,14 +94,14 @@ class VideoSettings:
         existed = self.target.exists()
         if existed:
             shutil.copy2(self.target, self.copy)
-        self.marker.write_text(json.dumps({"target": str(self.target), "existed": existed}))
+        self.marker.write_text(json.dumps({"target": str(self.target), "existed": existed}), encoding="utf-8")
         if changes:
             write_values(self.target, changes)
 
     def restore(self) -> None:
         """Put the player's file back. Safe to call more than once, and after a crash."""
         try:
-            info = json.loads(self.marker.read_text())
+            info = json.loads(self.marker.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return
         target = Path(info["target"])

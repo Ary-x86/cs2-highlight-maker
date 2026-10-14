@@ -42,7 +42,7 @@ def demo_key(demo: Path) -> str:
 
 def load_state() -> dict:
     try:
-        return json.loads(STATE_PATH.read_text())
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
@@ -50,7 +50,7 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
+    tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
     tmp.replace(STATE_PATH)
 
 

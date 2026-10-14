@@ -116,7 +116,7 @@ def montage(clips: list[Path], out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     listing = out.with_suffix(".txt")
     listing.write_text("".join(f"file '{str(c).replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'\n"
-                               for c in clips))
+                               for c in clips), encoding="utf-8")
     try:
         subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
                         "-i", str(listing), "-c", "copy", "-movflags", "+faststart", str(out)], check=True,

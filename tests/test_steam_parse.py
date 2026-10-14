@@ -9,7 +9,7 @@ STEAMID = "76561198000000001"
 
 class ParseMatchesTest(unittest.TestCase):
     def setUp(self):
-        self.matches = parse_matches(FIXTURE.read_text(), "Ranked Competitive", STEAMID)
+        self.matches = parse_matches(FIXTURE.read_text(encoding="utf-8"), "Ranked Competitive", STEAMID)
 
     def test_rows(self):
         self.assertEqual([m.map for m in self.matches], ["Dust II", "Mirage", "Train"])

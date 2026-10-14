@@ -131,12 +131,12 @@ class Cs2:
         if not self.audio_link.exists() and not system.is_link(self.audio_link):
             system.link_dir(self.audio_link, self.raw_dir)
 
-        content = self.gameinfo.read_text()
+        content = self.gameinfo.read_text(encoding="utf-8")
         if "Game\tcsgo/csdm" not in content:
             # The plugin restores gameinfo.gi from this backup as soon as it is loaded.
             shutil.copy2(self.gameinfo, self.gameinfo.with_name("gameinfo.gi.backup"))
             content = content.replace(GAMEINFO_SEARCH_PATH, "Game\tcsgo/csdm\n\t\t\t" + GAMEINFO_SEARCH_PATH, 1)
-            self.gameinfo.write_text(content)
+            self.gameinfo.write_text(content, encoding="utf-8")
 
     def uninstall(self) -> None:
         for link in (self.frames_link, self.audio_link):
@@ -219,7 +219,7 @@ class Cs2:
 
     def _plugin_hooked(self) -> bool:
         try:
-            return "Hooked FrameStageNotify" in self.plugin_log().read_text(errors="ignore")
+            return "Hooked FrameStageNotify" in self.plugin_log().read_text(encoding="utf-8", errors="ignore")
         except FileNotFoundError:
             return False
 

@@ -1,0 +1,107 @@
+name: Release
+
+# Push a tag like v0.2.0 to build everything and publish a GitHub release.
+# Run it by hand (Actions → Release → Run workflow) to only build the downloads as workflow artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  plugin-linux:
+    runs-on: ubuntu-latest
+    # Built inside Steam's own runtime SDK, the environment CS2 loads the plugin in.
+    container: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: CS2HL_WORK_DIR="$PWD/out" ./plugin/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux
+          path: out/bin/libserver.so
+
+  plugin-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: powershell -ExecutionPolicy Bypass -File plugin\build.ps1 -Out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-windows
+          path: out/server.dll
+
+  app-linux:
+    needs: plugin-linux
+    runs-on: ubuntu-22.04  # oldest supported glibc, so the binary runs on most distros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-linux
+          path: plugin-bin
+      - run: python -m pip install pyinstaller .
+      - run: python packaging/build.py --plugin plugin-bin/libserver.so
+      - run: tar -czf CS2HighlightMaker-linux-x86_64.tar.gz -C dist CS2HighlightMaker
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-linux
+          path: |
+            CS2HighlightMaker-linux-x86_64.tar.gz
+            plugin-bin/libserver.so
+
+  app-windows:
+    needs: plugin-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-windows
+          path: plugin-bin
+      - run: python -m pip install pyinstaller .
+      - run: python packaging/build.py --plugin plugin-bin/server.dll
+      - run: Compress-Archive -Path dist/CS2HighlightMaker -DestinationPath CS2HighlightMaker-windows-x64-portable.zip
+      - name: Installer
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || version="0.0.0"
+          choco install innosetup -y --no-progress
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "//DAppVersion=$version" packaging/windows-installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-windows
+          path: |
+            dist/CS2HighlightMaker-Setup.exe
+            CS2HighlightMaker-windows-x64-portable.zip
+            plugin-bin/server.dll
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [app-linux, app-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes \
+            --notes-file packaging/release-notes.md \
+            artifacts/dist/CS2HighlightMaker-Setup.exe \
+            artifacts/CS2HighlightMaker-windows-x64-portable.zip \
+            artifacts/CS2HighlightMaker-linux-x86_64.tar.gz \
+            artifacts/plugin-bin/libserver.so \
+            artifacts/plugin-bin/server.dll

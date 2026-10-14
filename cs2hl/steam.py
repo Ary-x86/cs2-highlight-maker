@@ -87,13 +87,13 @@ class Session:
     def save(self) -> None:
         SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(SESSION_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f)
 
     @staticmethod
     def load() -> Session | None:
         try:
-            return Session(**json.loads(SESSION_PATH.read_text()))
+            return Session(**json.loads(SESSION_PATH.read_text(encoding="utf-8")))
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return None
 

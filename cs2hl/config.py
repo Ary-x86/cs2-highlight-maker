@@ -157,7 +157,7 @@ def steam_accounts() -> list[str]:
     vdf = STEAM_ROOT / "config/loginusers.vdf"
     if not vdf.exists():
         return []
-    return re.findall(r'"(7656\d{13})"', vdf.read_text(errors="ignore"))
+    return re.findall(r'"(7656\d{13})"', vdf.read_text(encoding="utf-8", errors="ignore"))
 
 
 def find_cs2_installs() -> list[dict]:
@@ -166,13 +166,13 @@ def find_cs2_installs() -> list[dict]:
     if not vdf.exists():
         return []
     installs = []
-    for lib in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text(errors="ignore")):
+    for lib in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text(encoding="utf-8", errors="ignore")):
         lib = lib.replace("\\\\", "\\")  # Windows paths are stored with escaped backslashes
         manifest = Path(lib) / "steamapps/appmanifest_730.acf"
         game = Path(lib) / "steamapps/common/Counter-Strike Global Offensive"
         if not manifest.exists() or not (game / system.CS2_LAUNCHER).exists():
             continue
-        m = re.search(r'"LastUpdated"\s+"(\d+)"', manifest.read_text(errors="ignore"))
+        m = re.search(r'"LastUpdated"\s+"(\d+)"', manifest.read_text(encoding="utf-8", errors="ignore"))
         installs.append({"path": str(game), "updated": int(m.group(1)) if m else 0})
     return sorted(installs, key=lambda i: i["updated"], reverse=True)
 
@@ -187,7 +187,7 @@ def load() -> Config:
     cfg = Config()
     if CONFIG_PATH.exists():
         try:
-            data = tomllib.loads(CONFIG_PATH.read_text())
+            data = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as e:
             raise FriendlyError("Settings file is broken", f"{CONFIG_PATH}: {e}",
                                 "Fix the line mentioned, or delete the file to go back to defaults.")
@@ -224,5 +224,5 @@ def save(cfg: Config) -> None:
             lines.append(f"{key} = {_toml_value(value)}")
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONFIG_PATH.with_suffix(".tmp")
-    tmp.write_text("\n".join(lines + tables) + "\n")
+    tmp.write_text("\n".join(lines + tables) + "\n", encoding="utf-8")
     tmp.replace(CONFIG_PATH)

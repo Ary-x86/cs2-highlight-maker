@@ -106,7 +106,7 @@ class JobRunner:
 
     def _load(self) -> None:
         try:
-            data = json.loads(self.path.read_text())
+            data = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return
         names = {f.name for f in fields(Job)}
@@ -126,7 +126,7 @@ class JobRunner:
             data = {"jobs": [{**asdict(j), "log": j.log[-LOG_KEEP:]} for j in self.jobs]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data))
+        tmp.write_text(json.dumps(data), encoding="utf-8")
         tmp.replace(self.path)
 
     # --- queue operations ----------------------------------------------------------------------------
