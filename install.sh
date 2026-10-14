@@ -79,7 +79,8 @@ fi
 
 # --- launcher ---------------------------------------------------------------------------------------
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
-ln -sfn "$WORK/venv/bin/cs2hl" "$HOME/.local/bin/cs2hl"
+rm -f "$HOME/.local/bin/cs2hl"  # older versions linked straight into the venv
+install -m 755 "$REPO/bin/cs2hl" "$HOME/.local/bin/cs2hl"
 cp "$REPO/cs2hl/gui/static/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/cs2hl.svg"
 cat > "$HOME/.local/share/applications/cs2hl.desktop" <<EOF
 [Desktop Entry]

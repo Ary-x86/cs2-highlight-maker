@@ -8,3 +8,6 @@ config.toml
 *.dem
 *.mp4
 *.egg-info/
+
+# Conversation exports and other scratch text files
+/*.txt

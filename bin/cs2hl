@@ -1,0 +1,24 @@
+#!/bin/sh
+# cs2hl launcher. The app lives in its workspace, which may be on a drive that is not mounted yet
+# (desktops often mount extra drives only when they are opened), so try to mount it before giving up.
+WORK="${CS2HL_WORK_DIR:-$HOME/.local/share/cs2hl}"
+APP="$WORK/venv/bin/cs2hl"
+
+if [ ! -x "$APP" ] && command -v udisksctl >/dev/null 2>&1; then
+    target="$(readlink "$WORK" 2>/dev/null)"
+    case "$target" in
+        /run/media/*/*)
+            name="$(printf '%s' "$target" | cut -d/ -f5)"   # /run/media/<user>/<uuid or label>/...
+            for dev in "/dev/disk/by-uuid/$name" "/dev/disk/by-label/$name"; do
+                [ -e "$dev" ] && udisksctl mount -b "$dev" >/dev/null 2>&1 && break
+            done ;;
+    esac
+fi
+
+if [ ! -x "$APP" ]; then
+    msg="Can't find the app in $WORK. If it is on another drive, open that drive in your file manager (so it gets mounted) and try again. Otherwise re-run ./install.sh."
+    echo "$msg" >&2
+    command -v notify-send >/dev/null 2>&1 && notify-send -i dialog-error "CS2 Highlight Maker" "$msg"
+    exit 1
+fi
+exec "$APP" "$@"
