@@ -50,6 +50,13 @@ class VideoSettingsTest(unittest.TestCase):
         for key, value in videocfg.FALLBACK_DISPLAY.items():
             self.assertEqual(values[key], value)
 
+    def test_msaa_is_replaced_while_recording(self):
+        self.file.write_text(SAMPLE.replace("}", '\t"setting.msaa_samples"\t\t"4"\n}'))
+        self.assertEqual(videocfg.recording_changes(self.cfg, False), videocfg.NO_MSAA)
+        self.file.write_text(SAMPLE)
+        self.assertEqual(videocfg.recording_changes(self.cfg, False), {})
+        self.assertEqual(videocfg.recording_changes(self.cfg, True)["setting.msaa_samples"], "0")
+
 
 if __name__ == "__main__":
     unittest.main()

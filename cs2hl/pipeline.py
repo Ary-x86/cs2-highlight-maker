@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import detect, encode, videocfg
+from . import detect, encode, usercfg, videocfg
 from .config import MODES, PLUGIN_SO, STATE_PATH, WORK_DIR, Config
 from .errors import FriendlyError
 from .game import Clip, Cs2
@@ -204,7 +204,7 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
         rep.log("Using Very High graphics for the recording; your own settings come back afterwards")
     game.record(playable_link(demo), clips, spec["render_fps"], cfg.width, cfg.height, timeout,
                 crosshair=cfg.crosshair, custom_crosshair=cfg.custom_crosshair,
-                video_changes=videocfg.HIGH_QUALITY if cfg.graphics == "high" else None,
+                video_changes=videocfg.recording_changes(usercfg.active_account_cfg_dir(), cfg.graphics == "high"),
                 log=rep.log, progress=on_frames)
     rep.log(f"Recorded {len(clips)} take(s) in {fmt_duration(time.monotonic() - started)}")
 

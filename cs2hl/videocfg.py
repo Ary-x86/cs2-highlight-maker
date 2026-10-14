@@ -15,12 +15,16 @@ from pathlib import Path
 
 VIDEO_FILE = "cs2_video.txt"
 
-# Valve's own "Very High" preset (csgo/cfg/video_defaults_3.txt inside the game files), minus FSR upscaling.
+# With MSAA on, startmovie writes frames with red and blue swapped (tested on Linux/Vulkan, 2026-10), so recordings
+# always use CMAA2 anti-aliasing instead.
+NO_MSAA = {"setting.msaa_samples": "0", "setting.r_csgo_cmaa_enable": "1"}
+
+# Valve's own "Very High" preset (csgo/cfg/video_defaults_3.txt inside the game files), with CMAA2 instead of 8x MSAA
+# (see NO_MSAA) and without FSR upscaling.
 HIGH_QUALITY = {
     "setting.shaderquality": "1",
     "setting.r_texturefilteringquality": "5",   # anisotropic 16x
-    "setting.msaa_samples": "8",
-    "setting.r_csgo_cmaa_enable": "0",
+    **NO_MSAA,
     "setting.videocfg_shadow_quality": "3",
     "setting.videocfg_dynamic_shadows": "1",
     "setting.videocfg_texture_detail": "2",
@@ -30,9 +34,10 @@ HIGH_QUALITY = {
     "setting.videocfg_fsr_detail": "0",          # FidelityFX Super Resolution off
 }
 
-# Used only when the account had no cs2_video.txt before recording: fullscreen windowed, 16:9, 1920x1080.
+# Used only when the account had no cs2_video.txt before recording: fullscreen windowed, 16:9, 1920x1080
+# (the values CS2 on Linux writes for that mode).
 FALLBACK_DISPLAY = {
-    "setting.fullscreen": "1",
+    "setting.fullscreen": "0",
     "setting.coop_fullscreen": "1",
     "setting.nowindowborder": "1",
     "setting.aspectratiomode": "1",
@@ -49,6 +54,14 @@ def read(path: Path) -> dict[str, str]:
         if m := _LINE.match(line):
             values[m.group(2)] = m.group(4)
     return values
+
+
+def recording_changes(cfg_dir: Path | None, high_quality: bool) -> dict[str, str]:
+    """cs2_video.txt settings to use while recording."""
+    if high_quality:
+        return dict(HIGH_QUALITY)
+    current = read(cfg_dir / VIDEO_FILE) if cfg_dir and (cfg_dir / VIDEO_FILE).exists() else {}
+    return dict(NO_MSAA) if current.get("setting.msaa_samples", "0") not in ("", "0") else {}
 
 
 def write_values(path: Path, changes: dict[str, str]) -> None:

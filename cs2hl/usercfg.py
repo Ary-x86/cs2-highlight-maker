@@ -24,9 +24,10 @@ def active_account_cfg_dir() -> Path | None:
     text = vdf.read_text(errors="ignore")
     best, best_time = None, -1
     for steamid, body in re.findall(r'"(7656\d{13})"\s*\{([^}]*)\}', text):
-        if re.search(r'"MostRecent"\s+"1"', body):
+        # Key case varies between Steam versions ("MostRecent"/"Timestamp" vs "timestamp").
+        if re.search(r'"MostRecent"\s+"1"', body, re.I):
             best_time, best = float("inf"), steamid
-        m = re.search(r'"Timestamp"\s+"(\d+)"', body)
+        m = re.search(r'"Timestamp"\s+"(\d+)"', body, re.I)
         if m and int(m.group(1)) > best_time:
             best, best_time = steamid, int(m.group(1))
     if best is None:
