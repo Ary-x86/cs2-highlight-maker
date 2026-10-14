@@ -1,13 +1,37 @@
-workspace
-videos
-replays
+# Links to the folders the app uses on this machine (made by install.sh)
+/workspace
+/videos
+/replays
+
+# Personal settings and data never belong in the repo (see config.example.toml)
+config.toml
+steam_session.json
+state.json
+queue.json
+*.dem
+*.dem.bz2
+*.mp4
+
+# Python
 __pycache__/
 *.pyc
 .venv/
-config.toml
-*.dem
-*.mp4
+venv/
 *.egg-info/
+build/
+dist/
+*.spec.bak
+
+# Editor / OS / assistant tooling
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.claude/
+.claude-logs/
+CLAUDE.md
+CLAUDE.local.md
+*.log
 
 # Conversation exports and other scratch text files
 /*.txt

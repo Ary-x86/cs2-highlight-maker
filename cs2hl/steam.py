@@ -237,7 +237,7 @@ class PasswordLogin:
 
 @dataclass
 class Match:
-    id: str            # replay file stem, e.g. 003847966708505509917_1556420564
+    id: str            # replay file stem, e.g. 003800000000000000001_0000000001
     mode: str          # tab label
     map: str
     time: str          # ISO 8601 UTC
