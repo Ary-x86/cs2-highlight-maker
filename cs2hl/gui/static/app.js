@@ -60,7 +60,7 @@ function showPage(name, focus) {
 }
 $$("nav button").forEach((b) => (b.onclick = () => showPage(b.dataset.page)));
 $("#btn-steam-page").onclick = () => api("/api/open_url", { url: S.match_tab_urls[modeTab] })
-  .then(() => toast("Opened in your browser", "Put downloaded replays in the CS2 replays folder or ~/Downloads; the app will use them."))
+  .then(() => toast("Opened in your browser", "Put downloaded replays in the CS2 replays folder or your Downloads folder; the app will use them."))
   .catch(fail);
 
 $$(".tabs > button[data-tab]").forEach((b) => (b.onclick = () => {
@@ -85,8 +85,8 @@ async function refreshState() {
     S.steam_running ? ["ok", "Steam running"] : ["warn", "Steam closed (auto-starts)"],
   ];
   $("#chips").innerHTML = chips.map(([c, t]) => `<div class="chip ${c}">${esc(t)}</div>`).join("");
-  $("#replays-dir").textContent = S.cs2_dir ? S.cs2_dir + "/game/csgo/replays" : "(CS2 not found)";
-  $("#out-dir").textContent = S.clips_dir.replace(/\/clips$/, "");
+  $("#replays-dir").textContent = S.replays_dir || "(CS2 not found)";
+  $("#out-dir").textContent = S.output_path;
   $("#work-dir").textContent = S.work_dir;
   $("#btn-latest").classList.toggle("disabled", !S.session);
   $("#latest-hint").innerHTML = S.session
@@ -132,6 +132,7 @@ function fillSettings() {
   $("#output-height-field").classList.toggle("hidden", c.height <= 1080);
   $("#output-height").value = String(c.output_height && c.output_height < c.height ? c.output_height : 0);
   $("#graphics").value = c.graphics;
+  $("#codec").innerHTML = Object.keys(S.codecs).map((k) => `<option value="${k}">${esc(CODEC_LABELS[k] || S.codecs[k])}</option>`).join("");
   $("#codec").value = c.video_codec;
   $("#codec-hint").textContent = c.video_codec === "auto" ? "NVIDIA → AMD/Intel → CPU, whichever works first." : "";
   $("#quality").value = c.quality;
@@ -141,6 +142,11 @@ function fillSettings() {
     ? S.accounts.map((a) => `<span class="tag">${esc(a.name)} · ${esc(a.steamid)}</span>`).join(" ")
     : `<span class="muted">No Steam accounts found on this PC.</span>`;
 }
+
+const CODEC_LABELS = {
+  auto: "Automatic (recommended)", h264_nvenc: "NVIDIA GPU (NVENC)", h264_vaapi: "AMD / Intel GPU (VAAPI, experimental)",
+  h264_amf: "AMD GPU (AMF, experimental)", h264_qsv: "Intel GPU (Quick Sync, experimental)", libx264: "CPU (works everywhere)",
+};
 
 async function save(changes, quiet = false) {
   try {
@@ -279,7 +285,7 @@ async function pickerLoad(path) {
     const d = await api(`/api/browse?path=${encodeURIComponent(path)}`);
     $("#picker-path").value = d.path;
     $("#picker-note").textContent = d.is_cs2 ? "✔ This is a CS2 install" : "";
-    $("#picker-roots").innerHTML = d.roots.map((r) => `<button class="btn small" data-p="${esc(r)}">${esc(r.split("/").pop() || r)}</button>`).join("");
+    $("#picker-roots").innerHTML = d.roots.map((r) => `<button class="btn small" data-p="${esc(r)}">${esc(r.split(/[\\/]/).filter(Boolean).pop() || r)}</button>`).join("");
     $("#picker-list").innerHTML = `<div data-p="${esc(d.parent)}">⬆ ..</div>` + d.dirs.map((n) => `<div data-p="${esc(d.path + "/" + n)}">📁 ${esc(n)}</div>`).join("");
     $$("#picker [data-p]").forEach((el) => (el.onclick = () => pickerLoad(el.dataset.p)));
   } catch (e) { fail(e); }
@@ -296,7 +302,7 @@ $("#out-browse").onclick = async () => {
   const p = await pickFolder("Choose where videos are saved", S.config.output_dir || S.work_dir);
   if (p) save({ output_dir: p });
 };
-$("#btn-open-out").onclick = () => api("/api/open", { path: S.clips_dir.replace(/\/clips$/, "") }).catch(fail);
+$("#btn-open-out").onclick = () => api("/api/open", { path: S.output_path }).catch(fail);
 
 // ---------------------------------------------------------------- matches
 
@@ -630,6 +636,80 @@ $("#btn-logout").onclick = async () => {
   await refreshState(); renderSteam(); loadSteam();
 };
 
+// ---------------------------------------------------------------- first-run setup
+
+const INSTALL_FFMPEG = {
+  linux: "Install it with your package manager, e.g. <code>sudo apt install ffmpeg</code>, <code>sudo pacman -S ffmpeg</code> or <code>sudo dnf install ffmpeg</code>, then reopen this window.",
+  mac: "Install it with <code>brew install ffmpeg</code>.",
+};
+const PLUGIN_FIX = {
+  linux: "Run <code>./install.sh</code> in the app's folder; it builds the plugin (one time, needs <code>g++</code>).",
+  windows: "The plugin comes inside the app. Download the newest release again and start that.",
+  mac: "Recording happens inside CS2, which Valve doesn't make for macOS.",
+};
+
+function setupSteps() {
+  const st = S.setup, steps = [];
+  steps.push(S.cs2_dir
+    ? { ok: "ok", title: "Counter-Strike 2", body: `Found in <code>${esc(S.cs2_dir)}</code>` }
+    : { ok: "bad", title: "Counter-Strike 2", body: esc(S.cs2_error ? `${S.cs2_error.why} ${S.cs2_error.fix}` : "Not found."),
+        action: st.platform === "mac" ? null : ["Choose folder…", async () => {
+          const p = await pickFolder("Choose the 'Counter-Strike Global Offensive' folder", "");
+          if (p) await save({ cs2_dir: p }, true);
+        }] });
+  steps.push(S.accounts.length
+    ? { ok: "ok", title: "Your Steam accounts", body: `You will be recognised in demos as ${S.accounts.map((a) => `<b>${esc(a.name)}</b>`).join(", ")}.` }
+    : { ok: "warn", title: "Your Steam accounts", body: "No Steam account has logged in on this PC yet. Start Steam once, or add your SteamID64 under Settings → Accounts." });
+  steps.push(S.plugin_ok
+    ? { ok: "ok", title: "Recording plugin", body: "Ready. It is added to CS2 only while recording and removed right after." }
+    : { ok: "bad", title: "Recording plugin", body: PLUGIN_FIX[st.platform] });
+  const dl = st.ffmpeg_download;
+  steps.push(st.ffmpeg_ok
+    ? { ok: "ok", title: "FFmpeg (turns frames into videos)", body: "Installed." }
+    : st.platform === "windows"
+      ? { ok: "bad", title: "FFmpeg (turns frames into videos)",
+          body: dl.running ? `Downloading… ${Math.round(dl.progress * 100)}%` : dl.error ? esc(`${dl.error.title}: ${dl.error.why} ${dl.error.fix}`) : "Not found. The app can download it for you (about 200 MB, from the BtbN/FFmpeg-Builds project on GitHub).",
+          action: dl.running ? null : ["Download FFmpeg", () => api("/api/setup/ffmpeg", {}).then((r) => { S = r; renderSetup(); }).catch(fail)] }
+      : { ok: "bad", title: "FFmpeg (turns frames into videos)", body: INSTALL_FFMPEG[st.platform] });
+  steps.push({ ok: "ok", title: "Where videos are saved", body: `<code>${esc(S.output_path)}</code>`,
+    action: ["Change…", async () => {
+      const p = await pickFolder("Choose where videos are saved", S.config.output_dir || S.work_dir);
+      if (p) await save({ output_dir: p }, true);
+    }] });
+  steps.push(S.session
+    ? { ok: "ok", title: "Steam login (optional)", body: `Logged in as <b>${esc(S.session.account_name || S.session.steamid)}</b>.` }
+    : { ok: "warn", title: "Steam login (optional)", body: "Log in to list your matches and download their replays. Demos already on this PC work without it.",
+        action: ["Log in…", async () => { await finishSetup(); showPage("steam"); }] });
+  return steps;
+}
+
+function renderSetup() {
+  if (!S || !$("#setup").open) return;
+  const steps = setupSteps();
+  $("#setup-steps").innerHTML = steps.map((st, i) => `
+    <li class="${st.ok}"><span class="dot"></span><div><b>${esc(st.title)}</b><p class="muted small">${st.body}</p></div>
+    ${st.action ? `<button class="btn small" data-step="${i}">${esc(st.action[0])}</button>` : ""}</li>`).join("");
+  $$("#setup-steps [data-step]").forEach((b) => (b.onclick = async () => {
+    await steps[+b.dataset.step].action[1]();
+    await refreshState(); fillSettings(); renderSetup();
+  }));
+  const blocking = steps.filter((st) => st.ok === "bad").length;
+  $("#setup-note").textContent = blocking ? `${blocking} thing(s) still need attention before recording works. You can finish now and fix them later.` : "All set.";
+  if (S.setup.ffmpeg_download.running) setTimeout(() => refreshState().then(renderSetup), 1000);
+}
+
+async function finishSetup() {
+  try { S = await api("/api/setup/done", {}); } catch (e) { fail(e); }
+  $("#setup").close();
+}
+
+function openSetup() {
+  $("#setup").showModal();
+  renderSetup();
+}
+$("#setup-done").onclick = finishSetup;
+$$("[data-open-setup]").forEach((b) => (b.onclick = openSetup));
+
 // ---------------------------------------------------------------- boot
 
 (async function boot() {
@@ -644,6 +724,7 @@ $("#btn-logout").onclick = async () => {
   renderSteam();
   loadSteam();
   if (HASH.get("page")) showPage(HASH.get("page"));
+  if (S.setup.needed) openSetup();
   await pollQueue();
   setInterval(pollJob, 1000);
   setInterval(pollQueue, 2000);

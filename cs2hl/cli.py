@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, pipeline
+from . import config, firstrun, pipeline
 from .config import MODES, PLUGIN_SO
 from .errors import FriendlyError, explain
 from .game import Cs2, video_settings
@@ -136,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         args = parser.parse_args(["gui", *(argv or [])])
     try:
+        firstrun.provision_plugin()
         cfg = config.load()
         return args.func(cfg, args)
     except KeyboardInterrupt:

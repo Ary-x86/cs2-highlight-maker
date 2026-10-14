@@ -102,7 +102,8 @@
 
   <!-- SETTINGS -->
   <section id="page-settings" class="page">
-    <header class="page-head"><div><h1>Settings</h1><p class="muted">Changes save automatically.</p></div></header>
+    <header class="page-head"><div><h1>Settings</h1><p class="muted">Changes save automatically.</p></div>
+      <button class="btn" data-open-setup>🧭 Run setup again</button></header>
 
     <div class="card">
       <h2>Video style</h2>
@@ -210,7 +211,7 @@
           <span class="muted small">Recording at 1440p and saving at 1080p gives a crisper 1080p video.</span></label>
         <label class="field">Graphics while recording <select id="graphics"><option value="normal">Your own CS2 settings</option><option value="high">Very High (best looking)</option></select>
           <span class="muted small">Very High is used only for the recording; your own settings come back right after.</span></label>
-        <label class="field">Encoder <select id="codec"><option value="auto">Automatic (recommended)</option><option value="h264_nvenc">NVIDIA GPU (NVENC)</option><option value="h264_vaapi">AMD / Intel GPU (VAAPI, experimental)</option><option value="libx264">CPU (works everywhere)</option></select>
+        <label class="field">Encoder <select id="codec"></select>
           <span class="muted small" id="codec-hint"></span></label>
         <label class="field">Quality <input type="range" id="quality" min="16" max="30"><span class="muted small" id="quality-label"></span></label>
       </div>
@@ -261,7 +262,7 @@
 
   <!-- HELP -->
   <section id="page-help" class="page">
-    <header class="page-head"><div><h1>Help</h1></div></header>
+    <header class="page-head"><div><h1>Help</h1></div><button class="btn" data-open-setup>🧭 Run setup again</button></header>
     <div class="card prose">
       <h2>How it works</h2>
       <ol>
@@ -281,17 +282,17 @@
       <p><b>Record CS2 at 1080p or 1440p.</b> With 1440p you can save the final video at 1440p, or at 1080p: scaling down from 1440p makes a noticeably sharper 1080p video. 1440p needs a screen of at least 2560 × 1440 and takes longer.</p>
       <p><b>Graphics while recording.</b> "Very High" switches CS2 to Valve's Very High preset (high shaders, textures, particles, shadows, ambient occlusion, FSR off; CMAA2 anti-aliasing, because MSAA breaks the colours of recorded frames) just for the recording. Your own settings, display mode and resolution are put back as soon as CS2 closes, so you keep your low settings for playing.</p>
       <h2>Encoder</h2>
-      <p>Automatic uses your NVIDIA card (NVENC) if you have one, AMD/Intel (VAAPI) otherwise, and the CPU as a fallback. GPU encoding is tested on an RTX 3070 only; other GPUs are a work in progress. Encoding takes seconds per clip; most of the time goes into CS2 drawing every frame.</p>
+      <p>Automatic uses your NVIDIA card (NVENC) if you have one, AMD/Intel otherwise (VAAPI on Linux, AMF or Quick Sync on Windows), and the CPU as a fallback. GPU encoding is tested on an RTX 3070 only; other GPUs are a work in progress. Encoding takes seconds per clip; most of the time goes into CS2 drawing every frame.</p>
       <h2>How long does it take?</h2>
       <p>CS2 saves roughly 10–15 frames per second while recording, so a match with four highlights takes about 15 minutes (Smooth) or 30 minutes (Motion blur). The progress bar shows the time left.</p>
       <h2>Where do matches come from?</h2>
       <p><b>Steam matches</b> are split by mode (Ranked Competitive, Premier, Rush, Wingman, …) and come from your Steam "Personal Game Data" pages, the same ones with the <i>Download Replay</i> buttons. Replays are downloaded from Valve's replay servers. Those links are plain HTTP, which is why browsers call them unsafe; the files come straight from Valve. Valve deletes replays after a few weeks, so old matches show as expired.</p>
       <p><b>Demos on this PC</b> are <code>.dem</code> (or still-compressed <code>.dem.bz2</code>) files in your CS2 <code>replays</code> folder (in-game downloads, or any demo you copy there).</p>
-      <p><b>Already downloaded it yourself?</b> Use <b>Open on Steam ↗</b> above the match list to get to the Steam page with the <i>Download Replay</i> buttons. Put the file in the CS2 <code>replays</code> folder (or leave it in <code>~/Downloads</code>); when you queue that match, the app uses your copy instead of downloading it again, and never deletes it. Matches with a local copy show <span class="tag">💾 on this PC</span>.</p>
+      <p><b>Already downloaded it yourself?</b> Use <b>Open on Steam ↗</b> above the match list to get to the Steam page with the <i>Download Replay</i> buttons. Put the file in the CS2 <code>replays</code> folder (or leave it in your Downloads folder); when you queue that match, the app uses your copy instead of downloading it again, and never deletes it. Matches with a local copy show <span class="tag">💾 on this PC</span>.</p>
       <h2>Troubleshooting</h2>
       <dl>
-        <dt>"The recording plugin did not start inside CS2"</dt><dd>A CS2 update changed something the plugin depends on. Update this app (<code>git pull</code> then <code>./install.sh</code>).</dd>
-        <dt>CS2 opens but nothing happens / the game stays open</dt><dd>Use Cancel, then try again. If it keeps happening, run <code>cs2hl clean</code> in a terminal to remove the plugin from CS2.</dd>
+        <dt>"The recording plugin did not start inside CS2"</dt><dd>A CS2 update changed something the plugin depends on. Update this app: on Linux <code>git pull</code> then <code>./install.sh</code>, on Windows download the newest release.</dd>
+        <dt>CS2 opens but nothing happens / the game stays open</dt><dd>Use Cancel, then try again. If it keeps happening, run <code>cs2hl clean</code> in a terminal to remove the plugin from CS2 (on Windows, the next recording does the same clean-up).</dd>
         <dt>"You are not in this demo"</dt><dd>Only your own matches can be clipped. If you play on an account that never logged in on this PC, add its SteamID64 in Settings → Accounts.</dd>
         <dt>"Not enough disk space"</dt><dd>Frames are stored temporarily in the workspace folder. Free space there, or reinstall with the workspace on a bigger disk.</dd>
         <dt>Encoder errors</dt><dd>The app already falls back to the CPU when a GPU encoder fails. If it still fails, set Encoder to CPU in Settings.</dd>
@@ -309,6 +310,12 @@ cs2hl clean      # remove the CS2 plugin after a crash</pre>
   </section>
 </main>
 
+<dialog id="setup">
+  <div class="setup-head"><img src="icon.svg" alt=""><div><h2>Welcome to CS2 Highlight Maker</h2>
+    <p class="muted">A quick check that everything this PC needs is in place. Everything here can be changed later in Settings.</p></div></div>
+  <ol class="setup-steps" id="setup-steps"></ol>
+  <div class="setup-foot"><span class="muted small" id="setup-note"></span><button class="btn primary" id="setup-done">Finish setup</button></div>
+</dialog>
 <dialog id="picker">
   <div class="picker-head"><b id="picker-title">Choose a folder</b><button class="btn small" id="picker-close">✕</button></div>
   <div class="row"><input type="text" id="picker-path"><button class="btn small" id="picker-go">Go</button></div>

@@ -220,3 +220,18 @@ button.tag.done { color: var(--accent); }
 button.tag:hover { background: #ff9a1f22; }
 .item.flash { animation: flash 2.4s ease-out; border-color: var(--accent); }
 @keyframes flash { 0%, 30% { background: #ff9a1f40; box-shadow: 0 0 0 2px var(--accent); } 100% { background: var(--panel-2); box-shadow: none; } }
+
+/* first-run setup */
+#setup { width: min(720px, 94vw); padding: 22px; }
+.setup-head { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.setup-head img { width: 56px; height: 56px; }
+.setup-head h2 { font-size: 20px; margin: 0; }
+.setup-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.setup-steps li { display: flex; gap: 12px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.setup-steps li > div { flex: 1; min-width: 0; }
+.setup-steps li p { margin: 2px 0 0; }
+.setup-steps .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--muted); }
+.setup-steps .ok .dot { background: var(--good); }
+.setup-steps .warn .dot { background: var(--accent); }
+.setup-steps .bad .dot { background: var(--bad); }
+.setup-foot { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 16px; }

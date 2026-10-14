@@ -28,8 +28,9 @@ MODES = {
     "blur60": {"render_fps": 240, "blend": 4},
 }
 CROSSHAIR_CHOICES = ("donk", "classic", "custom")
-# auto: NVIDIA NVENC if there is an NVIDIA GPU, else VAAPI (AMD/Intel), else CPU. Falls back to CPU on errors.
-CODECS = ("auto", "h264_nvenc", "h264_vaapi", "libx264")
+# auto: NVIDIA NVENC if there is an NVIDIA GPU, else VAAPI on Linux / AMF or Quick Sync on Windows (AMD/Intel),
+# else CPU. Falls back to CPU on errors.
+CODECS = ("auto", "h264_nvenc", "h264_vaapi", "h264_amf", "h264_qsv", "libx264")
 GRAPHICS = ("normal", "high")  # high: Valve's Very High preset while recording, your own settings afterwards
 RESOLUTIONS = ((1920, 1080), (2560, 1440))
 # Rounds worth a clip. "ace" means killing the whole enemy team, so it adapts to Wingman/Rush team sizes.

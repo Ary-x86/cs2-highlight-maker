@@ -24,12 +24,14 @@ from pathlib import Path
 
 import segno
 
-from .. import config, jobs, pipeline, steam, system
+from .. import config, encode, firstrun, jobs, pipeline, steam, system
 from ..config import MODES, PLUGIN_SO, STEAM_ROOT, WORK_DIR
 from ..errors import FriendlyError, explain
 from ..game import CROSSHAIRS, Cs2, video_settings
 
 STATIC = Path(__file__).parent / "static"
+# GPU encoders offered in Settings on this OS (VAAPI is Linux-only, AMF and Quick Sync are offered on Windows).
+PLATFORM_CODECS = ("h264_nvenc", "h264_amf", "h264_qsv") if system.IS_WINDOWS else ("h264_nvenc", "h264_vaapi")
 IDLE_EXIT_SECONDS = 90  # quit when no window has polled for this long and nothing is running
 MATCH_ID = re.compile(r"\d{21}_\d{10}")  # Valve replay names: <match id>_<reservation>
 APP_BROWSERS = ("brave", "brave-browser", "chromium", "chromium-browser", "google-chrome-stable",
@@ -56,6 +58,7 @@ class App:
         self.histories: dict[str, steam.TabHistory] = {}
         self.last_seen = time.time()
         self.config_lock = threading.Lock()  # requests run in parallel; config edits must not overwrite each other
+        self.ffmpeg_download = firstrun.FfmpegDownload()
 
     # --- helpers ----------------------------------------------------------------------------------
 
@@ -88,6 +91,11 @@ class App:
             "crosshairs": CROSSHAIRS,
             "clips_dir": str(cfg.clips_dir),
             "montages_dir": str(cfg.montages_dir),
+            "output_path": str(cfg.output_path),
+            "replays_dir": str(cfg.replays_dir) if cs2 else None,
+            "codecs": {c: encode.CODEC_NAMES.get(c, "Automatic") for c in config.CODECS
+                       if c in ("auto", "libx264") or c in PLATFORM_CODECS},
+            "setup": {**firstrun.checks(), "ffmpeg_download": self.ffmpeg_download.status()},
             "work_dir": str(WORK_DIR.resolve()),
             "plugin_ok": PLUGIN_SO.exists(),
             "steam_running": pipeline.steam_running(),
@@ -424,6 +432,14 @@ def make_handler(app: App):
                 if url.path == "/api/open_url":
                     app.open_url(body["url"])
                     return self._json({"ok": True})
+                if url.path == "/api/setup/done":
+                    with app.config_lock:
+                        if not config.CONFIG_PATH.exists():
+                            config.save(config.load())
+                    return self._json(app.state())
+                if url.path == "/api/setup/ffmpeg":
+                    app.ffmpeg_download.start()
+                    return self._json(app.state())
                 if url.path == "/api/clean":
                     if Cs2.is_running():
                         raise FriendlyError("CS2 is running", "The plugin can only be removed when CS2 is closed.",
@@ -468,6 +484,7 @@ def serve(open_window: bool = True, port: int = 0) -> None:
         print("CS2 Highlight Maker is already running; opening a window.", flush=True)
         _open_window(existing)
         return
+    firstrun.provision_plugin()
     app = App()
     httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
     port = httpd.server_address[1]
