@@ -85,6 +85,8 @@ async function refreshState() {
     S.steam_running ? ["ok", "Steam running"] : ["warn", "Steam closed (auto-starts)"],
   ];
   $("#chips").innerHTML = chips.map(([c, t]) => `<div class="chip ${c}">${esc(t)}</div>`).join("");
+  S.output_path ??= S.clips_dir.replace(/[\\/]clips$/, "");  // older server still running after an update
+  S.replays_dir ??= S.cs2_dir ? S.cs2_dir + "/game/csgo/replays" : null;
   $("#replays-dir").textContent = S.replays_dir || "(CS2 not found)";
   $("#out-dir").textContent = S.output_path;
   $("#work-dir").textContent = S.work_dir;
@@ -132,6 +134,7 @@ function fillSettings() {
   $("#output-height-field").classList.toggle("hidden", c.height <= 1080);
   $("#output-height").value = String(c.output_height && c.output_height < c.height ? c.output_height : 0);
   $("#graphics").value = c.graphics;
+  S.codecs ??= { auto: "", h264_nvenc: "", h264_vaapi: "", libx264: "" };
   $("#codec").innerHTML = Object.keys(S.codecs).map((k) => `<option value="${k}">${esc(CODEC_LABELS[k] || S.codecs[k])}</option>`).join("");
   $("#codec").value = c.video_codec;
   $("#codec-hint").textContent = c.video_codec === "auto" ? "NVIDIA → AMD/Intel → CPU, whichever works first." : "";
@@ -704,6 +707,7 @@ async function finishSetup() {
 }
 
 function openSetup() {
+  if (!S.setup) return toast("Restart the app to use the setup screen", "It was updated while running.");
   $("#setup").showModal();
   renderSetup();
 }
@@ -724,7 +728,7 @@ $$("[data-open-setup]").forEach((b) => (b.onclick = openSetup));
   renderSteam();
   loadSteam();
   if (HASH.get("page")) showPage(HASH.get("page"));
-  if (S.setup.needed) openSetup();
+  if (S.setup?.needed) openSetup();
   await pollQueue();
   setInterval(pollJob, 1000);
   setInterval(pollQueue, 2000);
