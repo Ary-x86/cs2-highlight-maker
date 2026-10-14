@@ -10,7 +10,7 @@ from pathlib import Path
 from . import config, pipeline
 from .config import MODES, PLUGIN_SO
 from .errors import FriendlyError, explain
-from .game import Cs2
+from .game import Cs2, video_settings
 
 
 def _demos(cfg: config.Config, paths: list[str], only_pending: bool) -> list[Path]:
@@ -86,7 +86,8 @@ def cmd_clean(cfg, args) -> int:
         print("CS2 is running; close it first")
         return 1
     Cs2(cfg.cs2_path, PLUGIN_SO, config.WORK_DIR / "tmp/raw").uninstall()
-    print("plugin removed, gameinfo.gi restored")
+    video_settings().restore()
+    print("plugin removed, gameinfo.gi and your video settings restored")
     return 0
 
 

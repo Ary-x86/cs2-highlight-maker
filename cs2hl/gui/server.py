@@ -27,7 +27,7 @@ import segno
 from .. import config, jobs, pipeline, steam
 from ..config import MODES, PLUGIN_SO, STEAM_ROOT, WORK_DIR
 from ..errors import FriendlyError, explain
-from ..game import CROSSHAIRS, Cs2
+from ..game import CROSSHAIRS, Cs2, video_settings
 
 STATIC = Path(__file__).parent / "static"
 IDLE_EXIT_SECONDS = 90  # quit when no window has polled for this long and nothing is running
@@ -354,6 +354,7 @@ def make_handler(app: App):
                         raise FriendlyError("CS2 is running", "The plugin can only be removed when CS2 is closed.",
                                             "Close CS2 and try again.")
                     Cs2(config.load().cs2_path, PLUGIN_SO, WORK_DIR / "tmp/raw").uninstall()
+                    video_settings().restore()
                     return self._json({"ok": True})
                 self._json({"error": {"title": "Not found", "why": url.path, "fix": ""}}, 404)
             except Exception as e:  # noqa: BLE001

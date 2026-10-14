@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import usercfg
-from .config import STEAM_ROOT
+from .config import STEAM_ROOT, WORK_DIR
 from .errors import FriendlyError
+from .videocfg import VideoSettings
 
 SETUP_TICK = 96  # first tick where the plugin runs actions after a seek to tick 0
 GAMEINFO_SEARCH_PATH = "Game\tcsgo"
@@ -76,6 +77,12 @@ CROSSHAIR_FIXED = {"cl_crosshairoutline_r": 0, "cl_crosshairoutline_g": 0, "cl_c
                    "cl_crosshairoutline_a": 255, "cl_crosshair_recoil": 0}
 
 PLUGIN_HOOK_TIMEOUT = 240  # seconds to wait for the plugin to report it is driving playback
+
+
+def video_settings(cfg_dir: Path | None = None) -> VideoSettings:
+    if cfg_dir is None:
+        cfg_dir = usercfg.active_account_cfg_dir()
+    return VideoSettings(cfg_dir, WORK_DIR / "tmp/video-backup")
 
 
 @dataclass
@@ -208,9 +215,10 @@ class Cs2:
 
     def record(self, demo: Path, clips: list[Clip], framerate: int, width: int, height: int,
                timeout: float, crosshair: str = "donk", custom_crosshair: dict | None = None,
-               log=print, progress=None) -> None:
+               video_changes: dict | None = None, log=print, progress=None) -> None:
         """Play demo, record every clip, return once the game has quit.
 
+        video_changes are cs2_video.txt settings used only for this session (e.g. higher graphics quality).
         progress(frames_done, frames_total) is called every couple of seconds while recording.
         """
         if " " in str(demo):
@@ -222,6 +230,7 @@ class Cs2:
         restore = usercfg.restore_commands(saved, touched)
         cfg_backup = self.raw_dir.parent / "cfg-backup"
         usercfg.backup(cfg_dir, cfg_backup)
+        video = video_settings(cfg_dir)
 
         tickrate = 64
         total = sum(round((c.end_tick - c.start_tick) / tickrate * framerate) for c in clips)
@@ -229,6 +238,7 @@ class Cs2:
         actions_file.write_text(json.dumps(
             self.actions(clips, framerate, crosshair, custom_crosshair, restore), indent=1))
         self.install()
+        video.apply(video_changes or {})
         self.plugin_log().unlink(missing_ok=True)
         cmd = [str(self._runtime_entry()), "--verb=waitforexitandrun", "--",
                str(self.cs2_dir / "game/cs2.sh"), "-insecure", "-novid", "-nojoy",
@@ -267,6 +277,8 @@ class Cs2:
             raise
         finally:
             console.close()
+            # CS2 has exited (or was killed) and written its settings: put the player's display/quality back.
+            video.restore()
             self.uninstall()
             actions_file.unlink(missing_ok=True)
         if progress:
