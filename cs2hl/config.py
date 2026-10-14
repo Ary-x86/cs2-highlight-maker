@@ -27,7 +27,15 @@ MODES = {
     "blur60": {"render_fps": 240, "blend": 4},
 }
 CROSSHAIR_CHOICES = ("donk", "classic", "custom")
-CODECS = ("h264_nvenc", "libx264")
+# auto: NVIDIA NVENC if there is an NVIDIA GPU, else VAAPI (AMD/Intel), else CPU. Falls back to CPU on errors.
+CODECS = ("auto", "h264_nvenc", "h264_vaapi", "libx264")
+GRAPHICS = ("normal", "high")  # high: Valve's Very High preset while recording, your own settings afterwards
+RESOLUTIONS = ((1920, 1080), (2560, 1440))
+# Rounds worth a clip. "ace" means killing the whole enemy team, so it adapts to Wingman/Rush team sizes.
+ROUND_TYPES = ("3k", "4k", "ace", "clutch")
+# Single kills worth a clip on their own (see detect.SPECIAL_RULES).
+SPECIAL_KILLS = ("flick", "sniper_flick", "spray_transfer", "long_range", "noscope", "wallbang", "smoke",
+                 "jumpshot", "blind")
 
 DEFAULT_CUSTOM_CROSSHAIR = {
     "cl_crosshairstyle": 4,
@@ -52,12 +60,16 @@ class Config:
     # Where clips/ and montages/ are written; empty means the workspace folder
     output_dir: str = ""
     mode: str = "smooth120"
+    # Size CS2 renders at; output_height scales the final video (0 = same as recorded)
     width: int = 1920
     height: int = 1080
+    output_height: int = 0
+    graphics: str = "normal"
     crosshair: str = "donk"
     custom_crosshair: dict = field(default_factory=lambda: dict(DEFAULT_CUSTOM_CROSSHAIR))
     # Highlight rules
-    min_kills: int = 3
+    round_highlights: list[str] = field(default_factory=lambda: ["3k", "4k", "ace", "clutch"])
+    special_kills: list[str] = field(default_factory=list)
     clutch_min_enemies: int = 2
     pre_seconds: float = 3.0
     post_seconds: float = 2.0
@@ -65,7 +77,7 @@ class Config:
     # Delete demos downloaded from Steam once their highlights are rendered
     keep_downloaded_demos: bool = False
     # Encoder
-    video_codec: str = "h264_nvenc"
+    video_codec: str = "auto"
     quality: int = 23  # NVENC CQ / x264 CRF; lower = bigger, sharper
     # Give up on a CS2 launch after this many seconds (plus expected render time)
     launch_timeout: int = 300
@@ -107,6 +119,10 @@ class Config:
     def mode_spec(self) -> dict:
         return MODES[self.mode]
 
+    @property
+    def final_height(self) -> int:
+        return self.output_height if 0 < self.output_height < self.height else self.height
+
     def validate(self) -> None:
         if self.mode not in MODES:
             raise FriendlyError("Unknown video mode", f"'{self.mode}' is not a mode.",
@@ -117,6 +133,13 @@ class Config:
         if self.video_codec not in CODECS:
             raise FriendlyError("Unknown encoder", f"'{self.video_codec}' is not supported.",
                                 f"Use one of: {', '.join(CODECS)}.")
+        if self.graphics not in GRAPHICS:
+            raise FriendlyError("Unknown graphics setting", f"'{self.graphics}' is not a choice.",
+                                f"Use one of: {', '.join(GRAPHICS)}.")
+        for name, value, known in (("highlight type", self.round_highlights, ROUND_TYPES),
+                                   ("special kill", self.special_kills, SPECIAL_KILLS)):
+            if unknown := [v for v in value if v not in known]:
+                raise FriendlyError(f"Unknown {name}", ", ".join(unknown), f"Use any of: {', '.join(known)}.")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -164,6 +187,8 @@ def load() -> Config:
         for key, value in data.items():
             if key in known:
                 setattr(cfg, key, value)
+    if (cfg.width, cfg.height) not in RESOLUTIONS:  # older versions offered 720p
+        cfg.width, cfg.height = RESOLUTIONS[0]
     cfg.validate()
     return cfg
 

@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import detect, encode
+from . import detect, encode, videocfg
 from .config import MODES, PLUGIN_SO, STATE_PATH, WORK_DIR, Config
 from .errors import FriendlyError
 from .game import Clip, Cs2
@@ -115,7 +115,7 @@ def fmt_duration(seconds: float) -> str:
 
 def analyze(cfg: Config, demo: Path) -> detect.DemoInfo:
     try:
-        return detect.analyze(demo, cfg.accounts, min_kills=cfg.min_kills,
+        return detect.analyze(demo, cfg.accounts, round_types=cfg.round_highlights, special_kills=cfg.special_kills,
                               clutch_min_enemies=cfg.clutch_min_enemies, pre_seconds=cfg.pre_seconds,
                               post_seconds=cfg.post_seconds, max_gap_seconds=cfg.max_gap_seconds)
     except detect.NotYourMatch:
@@ -147,7 +147,8 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
         rep.log(f"  {h.name}  (score {h.score})")
     if not info.highlights:
         mark(key, highlights=0)
-        rep.log(f"No round with {cfg.min_kills}+ kills or a won 1v{cfg.clutch_min_enemies}+ clutch; nothing to record.")
+        rep.log("Nothing matched the highlight types picked in Settings → What counts as a highlight; "
+                "nothing to record.")
         return []
 
     clips: list[Clip] = []
@@ -164,7 +165,7 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
     raw_dir = WORK_DIR / "tmp/raw" / demo.stem
     shutil.rmtree(raw_dir, ignore_errors=True)
     raw_dir.parent.mkdir(parents=True, exist_ok=True)
-    need = frames * AVG_JPG_BYTES * 1.2
+    need = frames * AVG_JPG_BYTES * (cfg.width * cfg.height) / (1920 * 1080) * 1.2
     free = shutil.disk_usage(raw_dir.parent).free
     if free < need:
         raise FriendlyError("Not enough disk space",
@@ -199,15 +200,20 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
 
     # Rendering runs well above 5 fps on any GPU that plays CS2; the margin covers seeks and loading.
     timeout = cfg.launch_timeout + frames / 5 + 30 * len(clips)
+    if cfg.graphics == "high":
+        rep.log("Using Very High graphics for the recording; your own settings come back afterwards")
     game.record(playable_link(demo), clips, spec["render_fps"], cfg.width, cfg.height, timeout,
-                crosshair=cfg.crosshair, custom_crosshair=cfg.custom_crosshair, log=rep.log, progress=on_frames)
+                crosshair=cfg.crosshair, custom_crosshair=cfg.custom_crosshair,
+                video_changes=videocfg.HIGH_QUALITY if cfg.graphics == "high" else None,
+                log=rep.log, progress=on_frames)
     rep.log(f"Recorded {len(clips)} take(s) in {fmt_duration(time.monotonic() - started)}")
 
     rep.stage("Encoding clips")
     out_dir = cfg.clips_dir / match_folder(info)
     suffix = "" if mode == "smooth120" else f"_{mode}"
     outputs: list[Path] = []
-    codec = cfg.video_codec
+    codecs = encode.codec_chain(cfg.video_codec)
+    rep.log(f"Encoder: {encode.CODEC_NAMES[codecs[0]]}, {cfg.final_height}p")
     for n, (h, names) in enumerate(zip(info.highlights, takes_by_highlight)):
         rep.progress(n / len(info.highlights), f"clip {n + 1}/{len(info.highlights)}: {h.name}")
         try:
@@ -216,14 +222,17 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
             rep.log(f"  {h.name}: skipped, {e}")
             continue
         out = out_dir / f"{h.name}{suffix}.mp4"
-        try:
-            encode.encode_clip(takes, out, spec["render_fps"], spec["blend"], codec, cfg.quality)
-        except subprocess.CalledProcessError:
-            if codec == "libx264":
-                raise
-            rep.log("  NVIDIA encoder failed, falling back to CPU encoding (libx264)")
-            codec = "libx264"
-            encode.encode_clip(takes, out, spec["render_fps"], spec["blend"], codec, cfg.quality)
+        while True:
+            try:
+                encode.encode_clip(takes, out, spec["render_fps"], spec["blend"], codecs[0], cfg.quality,
+                                   height=cfg.final_height if cfg.final_height != cfg.height else 0)
+                break
+            except subprocess.CalledProcessError as e:
+                if len(codecs) == 1:
+                    raise FriendlyError("Encoding failed", f"ffmpeg could not encode {h.name}: {e.stderr or e}",
+                                        "Set Settings → Quality → Encoder to CPU and try again.") from e
+                rep.log(f"  {encode.CODEC_NAMES[codecs[0]]} failed, trying {encode.CODEC_NAMES[codecs[1]]}")
+                codecs.pop(0)
         outputs.append(out)
         rep.log(f"  wrote {out}")
     shutil.rmtree(raw_dir, ignore_errors=True)
