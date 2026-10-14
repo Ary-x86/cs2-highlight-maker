@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import detect, encode, usercfg, videocfg
+from . import detect, encode, system, usercfg, videocfg
 from .config import MODES, PLUGIN_SO, STATE_PATH, WORK_DIR, Config
 from .errors import FriendlyError
 from .game import Clip, Cs2
@@ -69,7 +69,7 @@ def pending_demos(cfg: Config) -> list[Path]:
 # --- helpers ----------------------------------------------------------------------------------------
 
 def steam_running() -> bool:
-    return subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
+    return system.process_running(system.STEAM_PROCESS)
 
 
 def ensure_steam(rep: Reporter) -> None:
@@ -77,8 +77,7 @@ def ensure_steam(rep: Reporter) -> None:
         return
     rep.log("Steam is not running, starting it")
     try:
-        subprocess.Popen(["steam", "-silent"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        system.start_steam()
     except FileNotFoundError:
         raise FriendlyError("Steam is not running", "CS2 needs the Steam client to start.",
                             "Start Steam, log in, then try again.")
@@ -98,6 +97,8 @@ def match_folder(info: detect.DemoInfo) -> str:
 
 def playable_link(demo: Path) -> Path:
     """CS2 splits +playdemo on spaces, so expose every demo through a space-free symlink."""
+    if system.IS_WINDOWS:
+        return demo  # Windows passes quoted arguments through intact, and symlinks need admin rights there
     link = WORK_DIR / "demos" / demo.name.replace(" ", "_")
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink() or link.exists():

@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import usercfg
+from . import system, usercfg
 from .config import STEAM_ROOT, WORK_DIR
 from .errors import FriendlyError
 from .videocfg import VideoSettings
@@ -113,22 +113,23 @@ class Cs2:
 
     @staticmethod
     def is_running() -> bool:
-        return subprocess.run(["pgrep", "-x", "cs2"], capture_output=True).returncode == 0
+        return system.process_running("cs2")
 
     # --- plugin install -------------------------------------------------------------------------
 
     def install(self) -> None:
         if not self.plugin_so.exists():
             raise FriendlyError("Recording plugin is missing", f"{self.plugin_so} does not exist.",
-                                "Run ./install.sh again (it builds the plugin), or plugin/build.sh.")
+                                "Run the setup again: ./install.sh on Linux (it builds the plugin), or restart "
+                                "the Windows app, which unpacks it.")
         self.uninstall()
-        bin_dir = self.plugin_dir / "bin/linuxsteamrt64"
+        bin_dir = self.plugin_dir / "bin" / system.GAME_BIN
         bin_dir.mkdir(parents=True)
-        shutil.copy2(self.plugin_so, bin_dir / "libserver.so")
+        shutil.copy2(self.plugin_so, bin_dir / system.PLUGIN_LIB)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
-        self.frames_link.symlink_to(self.raw_dir, target_is_directory=True)
-        if not self.audio_link.exists() and not self.audio_link.is_symlink():
-            self.audio_link.symlink_to(self.raw_dir, target_is_directory=True)
+        system.link_dir(self.frames_link, self.raw_dir)
+        if not self.audio_link.exists() and not system.is_link(self.audio_link):
+            system.link_dir(self.audio_link, self.raw_dir)
 
         content = self.gameinfo.read_text()
         if "Game\tcsgo/csdm" not in content:
@@ -139,8 +140,8 @@ class Cs2:
 
     def uninstall(self) -> None:
         for link in (self.frames_link, self.audio_link):
-            if link.is_symlink():
-                link.unlink()
+            if system.is_link(link):
+                system.remove_link(link)
         if self.plugin_dir.exists():
             shutil.rmtree(self.plugin_dir)
         backup = self.gameinfo.with_name("gameinfo.gi.backup")
@@ -192,6 +193,15 @@ class Cs2:
 
     # --- launch ---------------------------------------------------------------------------------
 
+    def launch_command(self, demo: Path, width: int, height: int) -> list[str]:
+        args = ["-insecure", "-novid", "-nojoy", "+playdemo", str(demo), "-width", str(width), "-height",
+                str(height), "-sw"]
+        if system.IS_WINDOWS:
+            return [str(self.cs2_dir / system.CS2_LAUNCHER), *args]
+        # On Linux CS2 runs inside Steam's container runtime, like Steam itself would start it.
+        return [str(self._runtime_entry()), "--verb=waitforexitandrun", "--", str(self.cs2_dir / "game/cs2.sh"),
+                *args]
+
     def _runtime_entry(self) -> Path:
         for lib in (STEAM_ROOT, self.cs2_dir.parent.parent.parent):
             entry = lib / "steamapps/common/SteamLinuxRuntime_sniper/_v2-entry-point"
@@ -221,7 +231,7 @@ class Cs2:
         video_changes are cs2_video.txt settings used only for this session (e.g. higher graphics quality).
         progress(frames_done, frames_total) is called every couple of seconds while recording.
         """
-        if " " in str(demo):
+        if " " in str(demo) and not system.IS_WINDOWS:
             raise ValueError("demo path must not contain spaces (CS2 splits +playdemo on them)")
         cfg_dir = usercfg.active_account_cfg_dir()
         saved = usercfg.read_convars(cfg_dir)
@@ -240,14 +250,14 @@ class Cs2:
         self.install()
         video.apply(video_changes or {})
         self.plugin_log().unlink(missing_ok=True)
-        cmd = [str(self._runtime_entry()), "--verb=waitforexitandrun", "--",
-               str(self.cs2_dir / "game/cs2.sh"), "-insecure", "-novid", "-nojoy",
-               "+playdemo", str(demo), "-width", str(width), "-height", str(height), "-sw"]
+        cmd = self.launch_command(demo, width, height)
         env = dict(os.environ, SteamAppId="730", SteamGameId="730")
         log(f"Launching CS2 to record {len(clips)} take(s), {total} frames")
         # CS2 prints its early console output to stdout on Linux; keep it for debugging.
         console = open(self.console_log(), "w")
-        proc = subprocess.Popen(cmd, env=env, stdout=console, stderr=subprocess.STDOUT)
+        # Windows: start in the game's bin folder, where the plugin writes csdm.log.
+        cwd = {"cwd": str(Path(cmd[0]).parent)} if system.IS_WINDOWS else {}
+        proc = subprocess.Popen(cmd, env=env, stdout=console, stderr=subprocess.STDOUT, **cwd)
         started = time.monotonic()
         try:
             deadline = started + timeout
@@ -266,7 +276,8 @@ class Cs2:
                         raise FriendlyError(
                             "The recording plugin did not start inside CS2",
                             "A CS2 update probably changed the game internals the plugin relies on.",
-                            "Update this tool (git pull, then ./install.sh). If it still fails, check "
+                            "Update this tool (Linux: git pull, then ./install.sh; Windows: download the newest "
+                            "release). If it still fails, check "
                             "github.com/akiver/cs-demo-manager for a newer plugin.")
                 if progress:
                     progress(self._frames_done(), total)
@@ -292,12 +303,12 @@ class Cs2:
 
     @staticmethod
     def kill() -> None:
-        subprocess.run(["pkill", "-x", "cs2"], capture_output=True)
+        system.kill_process("cs2")
         time.sleep(3)
-        subprocess.run(["pkill", "-9", "-x", "cs2"], capture_output=True)
+        system.kill_process("cs2", force=True)
 
     def console_log(self) -> Path:
         return self.raw_dir.parent / "cs2-console.log"
 
     def plugin_log(self) -> Path:
-        return self.cs2_dir / "game/bin/linuxsteamrt64/csdm.log"
+        return self.cs2_dir / "game/bin" / system.GAME_BIN / "csdm.log"

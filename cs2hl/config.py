@@ -8,14 +8,15 @@ import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from . import system
 from .errors import FriendlyError
 
-STEAM_ROOT = Path.home() / ".local/share/Steam"
-# Workspace (venv, plugin, temporary frames, state). setup can point this symlink at a bigger disk;
+STEAM_ROOT = system.steam_root()
+# Workspace (venv, plugin, temporary frames, state). On Linux, setup can point this symlink at a bigger disk;
 # the path itself has no spaces so CS2's +playdemo works.
-WORK_DIR = Path(os.environ.get("CS2HL_WORK_DIR", Path.home() / ".local/share/cs2hl"))
+WORK_DIR = Path(os.environ.get("CS2HL_WORK_DIR", system.default_work_dir()))
 CONFIG_PATH = WORK_DIR / "config.toml"
-PLUGIN_SO = WORK_DIR / "bin/libserver.so"
+PLUGIN_SO = WORK_DIR / "bin" / system.PLUGIN_LIB
 STATE_PATH = WORK_DIR / "state.json"
 SESSION_PATH = WORK_DIR / "steam_session.json"
 DOWNLOADS_DIR = WORK_DIR / "downloads"
@@ -86,13 +87,18 @@ class Config:
 
     @property
     def cs2_path(self) -> Path:
+        if system.IS_MAC:
+            raise FriendlyError(
+                "CS2 does not run on macOS",
+                "Valve only makes Counter-Strike 2 for Windows and Linux, and recording happens inside the game.",
+                "Use this app on a Windows or Linux PC. On a Mac you can still list the highlights in a demo.")
         path = Path(self.cs2_dir).expanduser() if self.cs2_dir else find_cs2_dir()
-        if path is None or not (path / "game/cs2.sh").exists():
+        if path is None or not (path / system.CS2_LAUNCHER).exists():
             raise FriendlyError(
                 "Counter-Strike 2 not found",
-                f"No CS2 install at {path}." if path else "Steam's library list has no Linux CS2 install.",
+                f"No CS2 install at {path}." if path else "Steam's library list has no CS2 install.",
                 "Install CS2 through Steam, or pick the right folder under Settings → Counter-Strike folder "
-                "(the folder that contains 'game/cs2.sh').")
+                f"(the 'Counter-Strike Global Offensive' folder that contains '{system.CS2_LAUNCHER}').")
         return path
 
     @property
@@ -160,9 +166,10 @@ def find_cs2_installs() -> list[dict]:
         return []
     installs = []
     for lib in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text(errors="ignore")):
+        lib = lib.replace("\\\\", "\\")  # Windows paths are stored with escaped backslashes
         manifest = Path(lib) / "steamapps/appmanifest_730.acf"
         game = Path(lib) / "steamapps/common/Counter-Strike Global Offensive"
-        if not manifest.exists() or not (game / "game/cs2.sh").exists():
+        if not manifest.exists() or not (game / system.CS2_LAUNCHER).exists():
             continue
         m = re.search(r'"LastUpdated"\s+"(\d+)"', manifest.read_text(errors="ignore"))
         installs.append({"path": str(game), "updated": int(m.group(1)) if m else 0})

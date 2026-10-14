@@ -24,7 +24,7 @@ from pathlib import Path
 
 import segno
 
-from .. import config, jobs, pipeline, steam
+from .. import config, jobs, pipeline, steam, system
 from ..config import MODES, PLUGIN_SO, STEAM_ROOT, WORK_DIR
 from ..errors import FriendlyError, explain
 from ..game import CROSSHAIRS, Cs2, video_settings
@@ -34,6 +34,17 @@ IDLE_EXIT_SECONDS = 90  # quit when no window has polled for this long and nothi
 MATCH_ID = re.compile(r"\d{21}_\d{10}")  # Valve replay names: <match id>_<reservation>
 APP_BROWSERS = ("brave", "brave-browser", "chromium", "chromium-browser", "google-chrome-stable",
                 "google-chrome", "microsoft-edge", "vivaldi")
+# Chromium-based browsers can open the app as its own window (--app). Windows and macOS don't put them on PATH.
+if system.IS_WINDOWS:
+    APP_BROWSER_PATHS = [Path(os.environ.get(root, "-")) / sub for root in ("ProgramFiles(x86)", "ProgramFiles",
+                                                                             "LOCALAPPDATA")
+                         for sub in ("Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe",
+                                     "BraveSoftware/Brave-Browser/Application/brave.exe")]
+elif system.IS_MAC:
+    APP_BROWSER_PATHS = [Path(f"/Applications/{app}.app/Contents/MacOS/{app}")
+                         for app in ("Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium")]
+else:
+    APP_BROWSER_PATHS = []
 
 
 class App:
@@ -213,17 +224,21 @@ class App:
         if not p.is_dir():
             p = p.parent if p.parent.is_dir() else Path.home()
         dirs = sorted((d.name for d in p.iterdir() if d.is_dir() and not d.name.startswith(".")), key=str.lower)
-        roots = [str(Path.home())] + [str(m) for m in Path("/run/media", os.environ.get("USER", "")).glob("*")
-                                      if m.is_dir()] + ["/mnt", "/media"]
+        if system.IS_WINDOWS:
+            roots = [str(Path.home())] + [f"{d}:\\" for d in "CDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{d}:/").exists()]
+        elif system.IS_MAC:
+            roots = [str(Path.home())] + [str(m) for m in Path("/Volumes").glob("*") if m.is_dir()]
+        else:
+            roots = [str(Path.home())] + [str(m) for m in Path("/run/media", os.environ.get("USER", "")).glob("*")
+                                          if m.is_dir()] + ["/mnt", "/media"]
         return {"path": str(p), "parent": str(p.parent), "dirs": dirs[:500],
-                "is_cs2": (p / "game/cs2.sh").exists(), "roots": [r for r in roots if Path(r).is_dir()]}
+                "is_cs2": (p / system.CS2_LAUNCHER).exists(), "roots": [r for r in roots if Path(r).is_dir()]}
 
     @staticmethod
     def open_url(url: str) -> None:
         if not url.startswith(steam.COMMUNITY + "/"):
             raise FriendlyError("Link not allowed", url, "Only steamcommunity.com pages can be opened from here.")
-        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        system.open_target(url)
 
     @staticmethod
     def open_path(path: str, reveal: bool) -> None:
@@ -231,8 +246,7 @@ class App:
         target = p.parent if reveal and p.is_file() else p
         if not target.exists():
             raise FriendlyError("File not found", str(p), "It may have been moved or deleted.")
-        subprocess.Popen(["xdg-open", str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        system.open_target(str(target))
 
     # --- login ------------------------------------------------------------------------------------
 
@@ -285,7 +299,7 @@ def _find_app_browser() -> str | None:
     for name in APP_BROWSERS:
         if path := shutil.which(name):
             return path
-    return None
+    return next((str(p) for p in APP_BROWSER_PATHS if p.exists()), None)
 
 
 def make_handler(app: App):
@@ -431,9 +445,9 @@ def _open_window(url: str) -> None:
     browser = _find_app_browser()
     if browser:
         profile = WORK_DIR / "gui-profile"
+        detach = {} if system.IS_WINDOWS else {"start_new_session": True}
         subprocess.Popen([browser, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1280,860",
-                          "--class=cs2hl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+                          "--class=cs2hl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
     else:
         webbrowser.open(url)
 

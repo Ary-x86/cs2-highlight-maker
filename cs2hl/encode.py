@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
-CODEC_NAMES = {"h264_nvenc": "NVIDIA GPU (NVENC)", "h264_vaapi": "AMD/Intel GPU (VAAPI)", "libx264": "CPU (x264)"}
+from . import system
+from .config import WORK_DIR
+
+CODEC_NAMES = {"h264_nvenc": "NVIDIA GPU (NVENC)", "h264_vaapi": "AMD/Intel GPU (VAAPI)",
+               "h264_amf": "AMD GPU (AMF)", "h264_qsv": "Intel GPU (Quick Sync)", "libx264": "CPU (x264)"}
+
+
+def ffmpeg() -> str:
+    """FFmpeg on PATH, else the copy the Windows setup downloads into the workspace."""
+    if shutil.which("ffmpeg"):
+        return "ffmpeg"
+    local = WORK_DIR / "bin" / ("ffmpeg.exe" if system.IS_WINDOWS else "ffmpeg")
+    return str(local) if local.exists() else "ffmpeg"
+
+
+def ffmpeg_available() -> bool:
+    return shutil.which(ffmpeg()) is not None or Path(ffmpeg()).exists()
 
 
 def _render_node() -> Path | None:
@@ -14,6 +31,9 @@ def _render_node() -> Path | None:
 
 def codec_chain(choice: str) -> list[str]:
     """Encoders to try in order; the CPU encoder is always the last resort."""
+    if choice == "auto" and system.IS_WINDOWS:
+        # nvidia-smi ships with the NVIDIA driver; otherwise try AMD, then Intel.
+        return ["h264_nvenc", "libx264"] if shutil.which("nvidia-smi") else ["h264_amf", "h264_qsv", "libx264"]
     if choice == "auto":
         if Path("/proc/driver/nvidia/version").exists():
             choice = "h264_nvenc"
@@ -37,6 +57,12 @@ def find_take(raw_dir: Path, name: str) -> Path:
 def _encoder_args(codec: str, quality: int) -> list[str]:
     if codec.endswith("_vaapi"):
         return ["-c:v", codec, "-rc_mode", "CQP", "-qp", str(quality)]
+    if codec.endswith("_amf"):
+        q = str(quality)
+        return ["-c:v", codec, "-quality", "quality", "-rc", "cqp", "-qp_i", q, "-qp_p", q, "-qp_b", q,
+                "-pix_fmt", "yuv420p"]
+    if codec.endswith("_qsv"):
+        return ["-c:v", codec, "-global_quality", str(quality), "-pix_fmt", "nv12"]
     if codec.endswith("_nvenc"):
         return ["-c:v", codec, "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", str(quality), "-b:v", "0",
                 "-maxrate", "60M", "-bufsize", "120M",
@@ -77,12 +103,12 @@ def encode_clip(takes: list[tuple[Path, str]], out: Path, render_fps: int, blend
     if codec.endswith("_vaapi"):
         chain += ["format=nv12", "hwupload"]
     graph += f"[v]{','.join(chain) or 'null'}[vo]"
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs,
+    cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", *inputs,
            "-filter_complex", graph, "-map", "[vo]", "-map", "[a]",
            *_encoder_args(codec, quality), "-c:a", "aac", "-b:a", "256k",
            "-movflags", "+faststart", str(out)]
     out.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, **system.NO_WINDOW)
 
 
 def montage(clips: list[Path], out: Path) -> None:
@@ -92,7 +118,8 @@ def montage(clips: list[Path], out: Path) -> None:
     listing.write_text("".join(f"file '{str(c).replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'\n"
                                for c in clips))
     try:
-        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-                        "-i", str(listing), "-c", "copy", "-movflags", "+faststart", str(out)], check=True)
+        subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+                        "-i", str(listing), "-c", "copy", "-movflags", "+faststart", str(out)], check=True,
+                       **system.NO_WINDOW)
     finally:
         listing.unlink(missing_ok=True)
