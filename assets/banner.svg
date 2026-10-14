@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 360" width="1280" height="360">
+  <defs>
+    <linearGradient id="bannerbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#131b25"/>
+      <stop offset="1" stop-color="#0b0f14"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="bannerglow" cx="0.18" cy="0.5" r="0.45">
+      <stop offset="0" stop-color="#ff9a1f" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ff9a1f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="360" rx="28" fill="url(#bannerbg)"/>
+  <rect width="1280" height="360" rx="28" fill="url(#grid)"/>
+  <rect width="1280" height="360" rx="28" fill="url(#bannerglow)"/>
+  <svg x="80" y="60" width="240" height="240" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="lbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2836"/>
+      <stop offset="1" stop-color="#0b0f14"/>
+    </linearGradient>
+    <radialGradient id="lglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff9a1f" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff9a1f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffb85c"/>
+      <stop offset="1" stop-color="#ff7a00"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#lbg)"/>
+  <circle cx="256" cy="256" r="190" fill="url(#lglow)"/>
+  <!-- scope ring, broken where the crosshair lines cross it -->
+  <g fill="none" stroke="url(#ring)" stroke-width="30" stroke-linecap="round">
+    <path d="M 194 113 A 156 156 0 0 0 113 194"/>
+    <path d="M 318 113 A 156 156 0 0 1 399 194"/>
+    <path d="M 194 399 A 156 156 0 0 1 113 318"/>
+    <path d="M 318 399 A 156 156 0 0 0 399 318"/>
+  </g>
+  <!-- crosshair lines -->
+  <g stroke="url(#ring)" stroke-width="30" stroke-linecap="round">
+    <path d="M256 58v96M256 358v96M58 256h96M358 256h96"/>
+  </g>
+  <!-- play button: the clip -->
+  <path d="M226 200 Q226 184 240 192 L322 242 Q336 251 322 260 L240 310 Q226 318 226 302 Z" fill="#ffffff"/>
+  <!-- highlight sparkle -->
+  <path d="M410 70 L420 98 L448 108 L420 118 L410 146 L400 118 L372 108 L400 98 Z" fill="#ffd9a3"/>
+  </svg>
+  <g font-family="Noto Sans, Inter, Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="370" y="160" font-size="72" font-weight="800" fill="#e6edf3">CS2 <tspan fill="#ff9a1f">Highlight</tspan> Maker</text>
+    <text x="372" y="218" font-size="28" fill="#8b9bb0">Your best rounds, found and recorded inside CS2. Automatically.</text>
+    <g font-size="20" font-weight="600" fill="#e6edf3">
+      <rect x="372" y="250" width="164" height="40" rx="20" fill="#18212c" stroke="#233041"/>
+      <text x="454" y="277" text-anchor="middle">120 fps · 1440p</text>
+      <rect x="548" y="250" width="160" height="40" rx="20" fill="#18212c" stroke="#233041"/>
+      <text x="628" y="277" text-anchor="middle">Motion blur</text>
+      <rect x="720" y="250" width="176" height="40" rx="20" fill="#18212c" stroke="#233041"/>
+      <text x="808" y="277" text-anchor="middle">Auto montages</text>
+      <rect x="908" y="250" width="200" height="40" rx="20" fill="#18212c" stroke="#233041"/>
+      <text x="1008" y="277" text-anchor="middle">Windows · Linux</text>
+    </g>
+  </g>
+</svg>
