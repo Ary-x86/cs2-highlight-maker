@@ -51,14 +51,17 @@ const fail = (e) => toast(e.title || "Error", [e.why, e.fix].filter(Boolean).joi
 
 // ---------------------------------------------------------------- navigation
 
-function showPage(name) {
+function showPage(name, focus) {
   $$("nav button").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
-  if (name === "videos") loadVideos();
+  if (name === "videos") loadVideos(focus || []);
   if (name === "queue") pollQueue();
   if (name === "steam") renderSteam();
 }
 $$("nav button").forEach((b) => (b.onclick = () => showPage(b.dataset.page)));
+$("#btn-steam-page").onclick = () => api("/api/open_url", { url: S.match_tab_urls[modeTab] })
+  .then(() => toast("Opened in your browser", "Put downloaded replays in the CS2 replays folder or ~/Downloads; the app will use them."))
+  .catch(fail);
 
 $$(".tabs > button[data-tab]").forEach((b) => (b.onclick = () => {
   $$(".tabs > button[data-tab]").forEach((x) => x.classList.toggle("active", x === b));
@@ -119,13 +122,18 @@ function fillSettings() {
 
   $("#output-dir").value = c.output_dir;
   $("#keep-demos").checked = c.keep_downloaded_demos;
-  $("#min-kills").value = String(c.min_kills);
-  $("#clutch-min").value = String(c.clutch_min_enemies);
+  $$("#round-types input[type=checkbox]").forEach((el) => (el.checked = c.round_highlights.includes(el.value)));
+  $("#clutch-min").value = String(Math.min(3, c.clutch_min_enemies));
+  fillSpecials();
   $("#pre-seconds").value = c.pre_seconds;
   $("#post-seconds").value = c.post_seconds;
   $("#max-gap").value = c.max_gap_seconds;
   $("#resolution").value = `${c.width}x${c.height}`;
+  $("#output-height-field").classList.toggle("hidden", c.height <= 1080);
+  $("#output-height").value = String(c.output_height && c.output_height < c.height ? c.output_height : 0);
+  $("#graphics").value = c.graphics;
   $("#codec").value = c.video_codec;
+  $("#codec-hint").textContent = c.video_codec === "auto" ? "NVIDIA → AMD/Intel → CPU, whichever works first." : "";
   $("#quality").value = c.quality;
   qualityLabel();
   $("#steamids").value = c.steamids.join(", ");
@@ -151,12 +159,33 @@ $$("#xhair-cards input").forEach((i) => (i.onchange = () => save({ crosshair: i.
 $("#cs2-select").onchange = (e) => save({ cs2_dir: e.target.value });
 $("#output-dir").onchange = (e) => save({ output_dir: e.target.value.trim() });
 $("#keep-demos").onchange = (e) => save({ keep_downloaded_demos: e.target.checked });
-$("#min-kills").onchange = (e) => save({ min_kills: +e.target.value });
+$$("#round-types input[type=checkbox]").forEach((el) => (el.onchange = () =>
+  save({ round_highlights: $$("#round-types input[type=checkbox]:checked").map((x) => x.value) })));
+$("#clutch-min").onclick = (e) => e.stopPropagation();
 $("#clutch-min").onchange = (e) => save({ clutch_min_enemies: +e.target.value });
+
+// Special shots dropdown with "Select all"
+const specialBoxes = () => $$("#special-dd .dd-panel input[value]");
+function fillSpecials() {
+  const chosen = S.config.special_kills;
+  specialBoxes().forEach((el) => (el.checked = chosen.includes(el.value)));
+  const all = $("#special-all");
+  all.checked = chosen.length === specialBoxes().length;
+  all.indeterminate = chosen.length > 0 && !all.checked;
+  const names = specialBoxes().filter((el) => el.checked).map((el) => $("b", el.parentElement).textContent);
+  $("#special-summary").textContent = !names.length ? "None (only the rounds above)"
+    : all.checked ? "All special shots" : names.length <= 3 ? names.join(", ") : `${names.length} selected`;
+}
+const saveSpecials = () => save({ special_kills: specialBoxes().filter((el) => el.checked).map((el) => el.value) }, true);
+specialBoxes().forEach((el) => (el.onchange = saveSpecials));
+$("#special-all").onchange = (e) => { specialBoxes().forEach((el) => (el.checked = e.target.checked)); saveSpecials(); };
+document.addEventListener("click", (e) => { const dd = $("#special-dd"); if (dd.open && !dd.contains(e.target)) dd.open = false; });
 $("#pre-seconds").onchange = (e) => save({ pre_seconds: +e.target.value });
 $("#post-seconds").onchange = (e) => save({ post_seconds: +e.target.value });
 $("#max-gap").onchange = (e) => save({ max_gap_seconds: +e.target.value });
 $("#resolution").onchange = (e) => { const [w, h] = e.target.value.split("x").map(Number); save({ width: w, height: h }); };
+$("#output-height").onchange = (e) => save({ output_height: +e.target.value });
+$("#graphics").onchange = (e) => save({ graphics: e.target.value });
 $("#codec").onchange = (e) => save({ video_codec: e.target.value });
 $("#quality").oninput = qualityLabel;
 $("#quality").onchange = (e) => save({ quality: +e.target.value });
@@ -280,13 +309,15 @@ function renderModeTabs() {
 }
 
 // A list row with a selection checkbox. `item` is what gets queued; null means it can't be queued.
-function pickRow(key, item, metaHtml, status) {
+function pickRow(key, item, metaHtml, status, files = []) {
   const el = document.createElement("div");
   el.className = "item" + (selected.has(key) ? " sel" : "");
   el.innerHTML = `<div class="pick">${item ? `<input type="checkbox" ${selected.has(key) ? "checked" : ""}>` : `<span style="width:17px"></span>`}
       <div class="meta">${metaHtml}</div></div>
     <div class="actions">${item ? (status === "queued" ? `<span class="tag done">in queue</span>`
       : `<button class="btn small primary">+ Add to queue</button>`) : `<span class="muted small">no replay</span>`}</div>`;
+  const made = $(".made", el);
+  if (made) made.onclick = () => showVideos(files);
   if (item) {
     const box = $("input", el);
     box.onchange = () => { box.checked ? selected.set(key, item) : selected.delete(key); el.classList.toggle("sel", box.checked); renderFab(); };
@@ -296,7 +327,7 @@ function pickRow(key, item, metaHtml, status) {
   return el;
 }
 
-async function loadSteam(refresh = false, more = false) {
+async function loadSteam(refresh = false, more = false, quiet = false) {
   const box = $("#steam-list");
   if (!S?.session) {
     box.innerHTML = `<div class="empty">Log in on the <a href="#" onclick="showPage('steam');return false">Steam account</a> page to see your matches.</div>`;
@@ -305,7 +336,7 @@ async function loadSteam(refresh = false, more = false) {
     return;
   }
   const tab = modeTab;
-  if (!more) box.innerHTML = `<div class="empty">Loading ${esc(S.match_tabs[tab])} matches from Steam…</div>`;
+  if (!more && !quiet) box.innerHTML = `<div class="empty">Loading ${esc(S.match_tabs[tab])} matches from Steam…</div>`;
   $("#btn-more").classList.add("disabled");
   try {
     const r = await api(`/api/matches?tab=${tab}${refresh ? "&refresh=1" : ""}${more ? "&more=1" : ""}`);
@@ -323,8 +354,11 @@ async function loadSteam(refresh = false, more = false) {
         <span class="tag ${m.result}">${esc(m.score || "–")} ${m.result ? esc(m.result) : ""}</span>
         <span class="muted small">${esc(m.kills)} / ${esc(m.assists)} / ${esc(m.deaths)} K/A/D</span>
         <span class="muted small">${esc(fmtTime(m.time))}${m.duration ? " · " + esc(m.duration) : ""}</span>
-        ${m.rendered ? `<span class="tag done">✔ made</span>` : ""}`;
-      box.append(pickRow(`match:${m.id}`, m.url ? { kind: "match", match: m } : null, meta, m.queued ? "queued" : ""));
+        ${m.rendered ? madeTag() : ""}
+        ${m.local ? `<span class="tag" title="${esc(m.local)}">💾 on this PC</span>` : ""}`;
+      // A replay you downloaded yourself can still be rendered after Valve's link expired.
+      const item = m.url || m.local ? { kind: "match", match: m } : null;
+      box.append(pickRow(`match:${m.id}`, item, meta, m.queued ? "queued" : "", m.files));
     }
   } catch (e) {
     box.innerHTML = `<div class="error-card">${errorHtml(e)}</div>`;
@@ -339,30 +373,42 @@ async function loadLocal() {
   try {
     const list = await api("/api/local");
     if (!list.length) { box.innerHTML = `<div class="empty">No .dem files in the replays folder.</div>`; return; }
-    const queued = new Set((Q?.items || []).filter((j) => ["queued", "running"].includes(j.status)).map((j) => j.title));
     box.innerHTML = "";
     for (const d of list) {
       const meta = `<span class="map">${esc(d.name)}</span>
         <span class="muted small">${esc(d.size_mb)} MB · ${esc(fmtTime(d.modified))}</span>
-        ${d.rendered ? `<span class="tag done">✔ made</span>` : ""}${d.skipped ? `<span class="tag">not your match</span>` : ""}`;
-      box.append(pickRow(`local:${d.path}`, { kind: "local", path: d.path }, meta, queued.has(d.name) ? "queued" : ""));
+        ${d.compressed ? `<span class="tag" title="Unpacked automatically when rendered">.bz2</span>` : ""}
+        ${d.rendered ? madeTag() : ""}${d.skipped ? `<span class="tag">not your match</span>` : ""}`;
+      box.append(pickRow(`local:${d.path}`, { kind: "local", path: d.path }, meta, d.queued ? "queued" : "", d.files));
     }
   } catch (e) { box.innerHTML = `<div class="error-card">${errorHtml(e)}</div>`; }
 }
 
-async function loadVideos() {
+const madeTag = () => `<button class="tag done made" title="Show these videos in My videos">✔ made ›</button>`;
+
+// Jump to My videos and flash the given files (a match's clips and montage).
+function showVideos(files) {
+  showPage("videos", files);
+}
+
+async function loadVideos(focus = []) {
   const box = $("#videos-list");
   try {
     const list = await api("/api/outputs");
     if (!list.length) { box.innerHTML = `<div class="empty">No videos yet. Make some highlights first!</div>`; return; }
     box.innerHTML = "";
     for (const v of list) box.append(videoItem(v.path, `${v.kind === "montage" ? "🎞 " : ""}${v.name}`, `${v.group} · ${v.size_mb} MB`));
+    const hits = $$("#videos-list .item").filter((el) => focus.includes(el.dataset.path));
+    if (focus.length && !hits.length) toast("Videos not found", "They were moved or deleted.", true);
+    hits.forEach((el) => { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); });
+    hits[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
   } catch (e) { box.innerHTML = `<div class="error-card">${errorHtml(e)}</div>`; }
 }
 
 function videoItem(path, title, sub) {
   const el = document.createElement("div");
   el.className = "item";
+  el.dataset.path = path;
   el.innerHTML = `<div class="meta"><span class="map">${esc(title)}</span><span class="muted small">${esc(sub)}</span></div>
     <div class="actions"><button class="btn small primary">▶ Play</button><button class="btn small">Show in folder</button></div>`;
   const [play, show] = $$("button", el);
@@ -393,8 +439,7 @@ async function addToQueue(items) {
   try {
     const r = await api("/api/queue/add", { items, mode: S.config.mode });
     toast(`Added ${r.ids.length} to the queue`, r.paused ? "The queue is paused: press Start on the Queue page." : "Rendering starts automatically, one at a time.");
-    await pollQueue();
-    if ($("#tab-local").classList.contains("active")) loadLocal(); else loadSteam();
+    await pollQueue();  // also refreshes the list rows ("in queue")
     return true;
   } catch (e) { fail(e); return false; }
 }
@@ -402,8 +447,17 @@ $("#btn-latest").onclick = () => addToQueue([{ kind: "latest" }]);
 
 const STATUS_ICON = { queued: "⏳", running: "🎬", done: "✅", failed: "⚠️", cancelled: "✖" };
 
+let activeSig = null;  // which jobs are waiting/running; a change means list rows need a new status
+
+function reloadMatchList() {
+  if ($("#tab-local").classList.contains("active")) loadLocal(); else if (S?.session) loadSteam(false, false, true);
+}
+
 async function pollQueue() {
   try { Q = await api("/api/queue"); } catch { return; }
+  const sig = Q.items.filter((j) => ["queued", "running"].includes(j.status)).map((j) => j.id).join(",");
+  if (activeSig !== null && sig !== activeSig) reloadMatchList();
+  activeSig = sig;
   const waiting = Q.items.filter((j) => j.status === "queued").length;
   const running = Q.items.find((j) => j.status === "running");
   $("#queue-count").textContent = waiting + (running ? 1 : 0);

@@ -31,6 +31,7 @@ from ..game import CROSSHAIRS, Cs2, video_settings
 
 STATIC = Path(__file__).parent / "static"
 IDLE_EXIT_SECONDS = 90  # quit when no window has polled for this long and nothing is running
+MATCH_ID = re.compile(r"\d{21}_\d{10}")  # Valve replay names: <match id>_<reservation>
 APP_BROWSERS = ("brave", "brave-browser", "chromium", "chromium-browser", "google-chrome-stable",
                 "google-chrome", "microsoft-edge", "vivaldi")
 
@@ -43,6 +44,7 @@ class App:
         self.login_error: dict | None = None
         self.histories: dict[str, steam.TabHistory] = {}
         self.last_seen = time.time()
+        self.config_lock = threading.Lock()  # requests run in parallel; config edits must not overwrite each other
 
     # --- helpers ----------------------------------------------------------------------------------
 
@@ -83,9 +85,16 @@ class App:
             "queue_waiting": sum(1 for j in self.runner.jobs if j.status == "queued"),
             "queue_paused": self.runner.paused,
             "match_tabs": steam.MATCH_TABS,
+            "match_tab_urls": {tab: steam.gcpd_url(session.steamid if session else None, tab)
+                               for tab in steam.MATCH_TABS},
         }
 
     def save_config(self, changes: dict) -> dict:
+        with self.config_lock:
+            self._save_config(changes)
+        return self.state()
+
+    def _save_config(self, changes: dict) -> None:
         cfg = config.load()
         known = cfg.to_dict()
         for key, value in changes.items():
@@ -105,7 +114,6 @@ class App:
                 raise FriendlyError("Cannot use that output folder", str(e),
                                     "Pick a folder you can write to, on a disk with free space.")
         config.save(cfg)
-        return self.state()
 
     def matches(self, tab: str, refresh: bool, more: bool) -> dict:
         session = steam.Session.load()
@@ -117,11 +125,23 @@ class App:
             history = self.histories[tab] = steam.TabHistory(session, tab)
         if not history.started or more:
             history.load(min_new=5, max_requests=6)
-        done = {k.split(".dem:")[0] for k, v in pipeline.load_state().items() if v.get("files")}
+        made = rendered_demos()
         queued = {jobs._spec_key(j.spec) for j in self.runner.jobs if j.status in jobs.ACTIVE}
-        return {"matches": [{**m.__dict__, "rendered": m.id in done, "queued": f"match:{m.id}" in queued}
-                            for m in history.matches],
-                "reached": history.reached, "exhausted": history.exhausted}
+        search = steam.demo_search_dirs(self._replays_dir())
+        out = []
+        for m in history.matches:
+            local = steam.find_local(m.id, search)
+            files = files_for(m.id, made)
+            out.append({**m.__dict__, "rendered": bool(files), "files": files, "queued": f"match:{m.id}" in queued,
+                        "local": str(local) if local else None})
+        return {"matches": out, "reached": history.reached, "exhausted": history.exhausted}
+
+    @staticmethod
+    def _replays_dir() -> Path | None:
+        try:
+            return config.load().replays_dir
+        except FriendlyError:
+            return None
 
     def queue(self) -> dict:
         current = self.runner.current
@@ -137,7 +157,8 @@ class App:
             if kind == "match":
                 known = {f.name for f in dataclasses.fields(steam.Match)}
                 spec = {"kind": "match", "match": {k: v for k, v in item["match"].items() if k in known}}
-                if not spec["match"].get("url"):
+                if not spec["match"].get("url") and not steam.find_local(
+                        spec["match"].get("id", ""), steam.demo_search_dirs(self._replays_dir())):
                     raise FriendlyError("Replay not available", f"{spec['match'].get('map')} has no replay to download.",
                                         "Valve only keeps replays for a few weeks; pick a newer match.")
             elif kind == "local":
@@ -155,12 +176,24 @@ class App:
     def local_demos(self) -> list[dict]:
         cfg = config.load()
         state = pipeline.load_state()
+        made = rendered_demos()
+        queued = {jobs._spec_key(j.spec) for j in self.runner.jobs if j.status in jobs.ACTIVE}
+        demos = list(cfg.replays_dir.glob("*.dem"))
+        def match_key(p: Path) -> str:
+            m = MATCH_ID.search(p.name)
+            return m.group() if m else p.name.removesuffix(".bz2")
+        have = {match_key(d) for d in demos}
+        # Compressed replays (e.g. from the Steam website), unless that match is already unpacked next to it.
+        demos += [z for z in cfg.replays_dir.glob("*.dem.bz2") if match_key(z) not in have]
         out = []
-        for dem in sorted(cfg.replays_dir.glob("*.dem"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for dem in sorted(demos, key=lambda p: p.stat().st_mtime, reverse=True):
+            stem = dem.name.removesuffix(".bz2")
             info = state.get(pipeline.demo_key(dem), {})
+            files = files_for(stem, made)
             out.append({"path": str(dem), "name": dem.name, "size_mb": round(dem.stat().st_size / 1e6),
                         "modified": datetime.fromtimestamp(dem.stat().st_mtime).isoformat(timespec="minutes"),
-                        "rendered": bool(info.get("files")), "skipped": info.get("skipped")})
+                        "compressed": dem.name.endswith(".bz2"), "rendered": bool(files), "files": files,
+                        "queued": f"local:{dem}" in queued, "skipped": info.get("skipped")})
         return out
 
     def outputs(self) -> list[dict]:
@@ -169,7 +202,7 @@ class App:
         for folder in (cfg.montages_dir, cfg.clips_dir):
             if folder.exists():
                 for f in folder.rglob("*.mp4"):
-                    items.append({"path": str(f), "name": f.name, "group": f.parent.name,
+                    items.append({"path": str(f.resolve()), "name": f.name, "group": f.parent.name,
                                   "kind": "montage" if folder == cfg.montages_dir else "clip",
                                   "size_mb": round(f.stat().st_size / 1e6), "mtime": f.stat().st_mtime})
         return sorted(items, key=lambda i: i["mtime"], reverse=True)[:200]
@@ -184,6 +217,13 @@ class App:
                                       if m.is_dir()] + ["/mnt", "/media"]
         return {"path": str(p), "parent": str(p.parent), "dirs": dirs[:500],
                 "is_cs2": (p / "game/cs2.sh").exists(), "roots": [r for r in roots if Path(r).is_dir()]}
+
+    @staticmethod
+    def open_url(url: str) -> None:
+        if not url.startswith(steam.COMMUNITY + "/"):
+            raise FriendlyError("Link not allowed", url, "Only steamcommunity.com pages can be opened from here.")
+        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
 
     @staticmethod
     def open_path(path: str, reveal: bool) -> None:
@@ -221,6 +261,24 @@ class App:
         else:
             result["needs_code"] = self.login.needs_code
         return result
+
+
+def rendered_demos() -> list[tuple[str, float, list[str]]]:
+    """(demo file name, when, existing output files) for every demo that produced videos."""
+    out = []
+    for key, info in pipeline.load_state().items():
+        # resolved, so they compare equal to outputs() even when saved through the workspace symlink
+        files = [str(Path(f).resolve()) for f in info.get("files") or [] if Path(f).exists()]
+        if files:
+            out.append((key.rsplit(":", 1)[0], datetime.fromisoformat(info["at"]).timestamp() if info.get("at") else 0,
+                        files))
+    return out
+
+
+def files_for(fragment: str, made: list[tuple[str, float, list[str]]]) -> list[str]:
+    """Videos of the newest render whose demo name contains fragment (a match id or demo name)."""
+    hits = [(at, files) for name, at, files in made if fragment in name]
+    return max(hits, default=(0, []))[1]
 
 
 def _find_app_browser() -> str | None:
@@ -348,6 +406,9 @@ def make_handler(app: App):
                     return self._json({"ok": True})
                 if url.path == "/api/open":
                     app.open_path(body["path"], bool(body.get("reveal")))
+                    return self._json({"ok": True})
+                if url.path == "/api/open_url":
+                    app.open_url(body["url"])
                     return self._json({"ok": True})
                 if url.path == "/api/clean":
                     if Cs2.is_running():

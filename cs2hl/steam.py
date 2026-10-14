@@ -377,6 +377,67 @@ def latest_match(session: Session) -> Match | None:
 
 # --- download -----------------------------------------------------------------------------------------
 
+def gcpd_url(steamid: str | None, tab: str) -> str:
+    """The Steam page that lists these matches with their Download Replay buttons."""
+    who = f"profiles/{steamid}" if steamid else "my"
+    return f"{COMMUNITY}/{who}/gcpd/730?tab={tab}"
+
+
+def demo_search_dirs(replays_dir: Path | None) -> list[Path]:
+    """Where a replay downloaded by hand (browser, CS2's Watch tab) usually ends up."""
+    dirs = [replays_dir] if replays_dir else []
+    return dirs + [DOWNLOADS_DIR, Path.home() / "Downloads"]
+
+
+def find_local(match_id: str, folders: list[Path]) -> Path | None:
+    """A copy of this match's replay already on the PC: a .dem, or else a still-compressed .dem.bz2."""
+    found: list[Path] = []
+    for folder in folders:
+        try:
+            found += [p for p in folder.iterdir() if match_id in p.name and p.name.endswith((".dem", ".dem.bz2"))]
+        except OSError:
+            continue
+    found = [p for p in found if p.is_file() and p.stat().st_size > 0]
+    return min(found, key=lambda p: p.name.endswith(".bz2"), default=None)
+
+
+def _unpack_stream(read, total: int, dest: Path, progress=None, verb: str = "") -> None:
+    """Decompress a .bz2 stream (read(n) -> bytes) into dest, atomically."""
+    part = dest.with_suffix(".dem.part")
+    got = 0
+    started = time.monotonic()
+    decomp = bz2.BZ2Decompressor()
+    try:
+        with open(part, "wb") as out:
+            while chunk := read(1 << 20):
+                got += len(chunk)
+                out.write(decomp.decompress(chunk))
+                if progress:
+                    speed = got / max(1e-6, time.monotonic() - started)
+                    detail = f"{verb}{got / 1e6:.0f}/{total / 1e6:.0f} MB at {speed / 1e6:.1f} MB/s" if total \
+                        else f"{verb}{got / 1e6:.0f} MB"
+                    progress(got / total if total else None, detail)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    part.replace(dest)
+
+
+def unpack(src: Path, progress=None) -> Path:
+    """Decompress a local .dem.bz2 into the downloads folder."""
+    DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    dem = DOWNLOADS_DIR / src.name.removesuffix(".bz2")
+    if not dem.exists():
+        try:
+            with open(src, "rb") as f:
+                _unpack_stream(f.read, src.stat().st_size, dem, progress, "unpacking ")
+        except (OSError, EOFError) as e:
+            raise FriendlyError("Could not unpack the demo", f"{src.name}: {e}",
+                                "The .bz2 file is probably incomplete. Download it again.") from e
+        os.utime(dem, (src.stat().st_mtime, src.stat().st_mtime))
+    return dem
+
+
 def download(match: Match, progress=None) -> Path:
     """Fetch and unpack a replay into the downloads folder. progress(fraction, detail) is optional."""
     if not match.url:
@@ -387,7 +448,6 @@ def download(match: Match, progress=None) -> Path:
     dem = DOWNLOADS_DIR / f"{match.id}.dem"
     if dem.exists():
         return dem
-    part = dem.with_suffix(".dem.part")
     try:
         resp = _request(match.url, timeout=60)
     except urllib.error.HTTPError as e:
@@ -396,25 +456,12 @@ def download(match: Match, progress=None) -> Path:
                                 "Pick a more recent match.") from e
         raise FriendlyError("Download failed", f"Valve's replay server answered HTTP {e.code}.",
                             "Try again in a minute.") from e
-    total = int(resp.headers.get("Content-Length") or 0)
-    got = 0
-    started = time.monotonic()
-    decomp = bz2.BZ2Decompressor()
     try:
-        with resp, open(part, "wb") as out:
-            while chunk := resp.read(1 << 20):
-                got += len(chunk)
-                out.write(decomp.decompress(chunk))
-                if progress:
-                    speed = got / max(1e-6, time.monotonic() - started)
-                    detail = f"{got / 1e6:.0f}/{total / 1e6:.0f} MB at {speed / 1e6:.1f} MB/s" if total \
-                        else f"{got / 1e6:.0f} MB"
-                    progress(got / total if total else None, detail)
+        with resp:
+            _unpack_stream(resp.read, int(resp.headers.get("Content-Length") or 0), dem, progress)
     except (OSError, EOFError) as e:
-        part.unlink(missing_ok=True)
         raise FriendlyError("Download failed", f"{type(e).__name__}: {e}",
                             "Check your connection and disk space, then try again.") from e
-    part.replace(dem)
     if match.time:  # date output folders by when the match was played, not when it was downloaded
         played = datetime.fromisoformat(match.time).timestamp()
         os.utime(dem, (played, played))

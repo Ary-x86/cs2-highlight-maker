@@ -54,7 +54,8 @@
         <button class="btn small" id="btn-refresh">↻ Refresh</button>
       </div>
       <div id="tab-steam" class="tab active">
-        <div class="subtabs" id="mode-tabs"></div>
+        <div class="row subrow"><div class="subtabs" id="mode-tabs"></div><div class="spacer"></div>
+          <button class="btn small" id="btn-steam-page" title="Open this match list on steamcommunity.com, e.g. to download a replay yourself">Open on Steam ↗</button></div>
         <div id="steam-list" class="list"></div>
         <div class="center"><span class="muted small" id="steam-reached"></span><br><button class="btn small hidden" id="btn-more">Load older matches</button></div>
       </div>
@@ -165,9 +166,35 @@
 
     <div class="card">
       <h2>What counts as a highlight</h2>
+      <h3 class="sub">Rounds <span class="muted small">the whole round is clipped</span></h3>
+      <div class="pills" id="round-types">
+        <label class="pill"><input type="checkbox" value="3k"> 3 kills</label>
+        <label class="pill"><input type="checkbox" value="4k"> 4 kills</label>
+        <label class="pill"><input type="checkbox" value="ace"> Ace</label>
+        <label class="pill"><input type="checkbox" value="clutch"> Won clutches
+          <select id="clutch-min"><option value="1">1v1 and up</option><option value="2">1v2 and up</option><option value="3">1v3 and up</option></select></label>
+      </div>
+      <p class="muted small">An ace is the whole enemy team, so it adjusts to the mode by itself: 5 kills in Premier and Competitive, fewer in Wingman and Rush.</p>
+
+      <h3 class="sub">Special shots <span class="muted small">clipped on their own, also in rounds without a multi-kill</span></h3>
+      <details class="dropdown" id="special-dd">
+        <summary><span id="special-summary">None</span><span class="caret">▾</span></summary>
+        <div class="dd-panel">
+          <label class="dd-all"><input type="checkbox" id="special-all"> <b>Select all</b></label>
+          <label><input type="checkbox" value="flick"><span><b>Flicks</b><em>The crosshair snaps 30°+ in a fifth of a second right before the hit</em></span></label>
+          <label><input type="checkbox" value="sniper_flick"><span><b>Sniper flicks</b><em>AWP or Scout kills with a 20°+ snap right before the shot</em></span></label>
+          <label><input type="checkbox" value="spray_transfer"><span><b>Spray transfers</b><em>Two kills in one continuous spray with a rifle, SMG or machine gun</em></span></label>
+          <label><input type="checkbox" value="long_range"><span><b>Long range</b><em>Kills from 40 meters or more</em></span></label>
+          <label><input type="checkbox" value="noscope"><span><b>No-scopes</b><em>Sniper kills without zooming in</em></span></label>
+          <label><input type="checkbox" value="wallbang"><span><b>Wallbangs</b><em>Kills through a wall, door or box</em></span></label>
+          <label><input type="checkbox" value="smoke"><span><b>Through smoke</b><em>Kills through a smoke grenade</em></span></label>
+          <label><input type="checkbox" value="jumpshot"><span><b>Jump shots</b><em>Kills while in the air</em></span></label>
+          <label><input type="checkbox" value="blind"><span><b>Blind kills</b><em>Kills while flashed</em></span></label>
+        </div>
+      </details>
+
+      <h3 class="sub">Timing</h3>
       <div class="grid3">
-        <label class="field">Kills in a round <select id="min-kills"><option value="2">2 or more</option><option value="3">3 or more</option><option value="4">4 or more</option><option value="5">Aces only</option></select></label>
-        <label class="field">Won clutches <select id="clutch-min"><option value="1">1v1 and up</option><option value="2">1v2 and up</option><option value="3">1v3 and up</option><option value="99">Ignore clutches</option></select></label>
         <label class="field">Seconds before first kill <input type="number" id="pre-seconds" min="0" max="15" step="0.5"></label>
         <label class="field">Seconds after last kill <input type="number" id="post-seconds" min="0" max="15" step="0.5"></label>
         <label class="field">Cut pauses longer than (s) <input type="number" id="max-gap" min="2" max="60" step="1"></label>
@@ -177,10 +204,17 @@
     <div class="card">
       <h2>Quality</h2>
       <div class="grid3">
-        <label class="field">Resolution <select id="resolution"><option value="1280x720">1280 × 720</option><option value="1920x1080">1920 × 1080</option><option value="2560x1440">2560 × 1440</option></select></label>
-        <label class="field">Encoder <select id="codec"><option value="h264_nvenc">NVIDIA GPU (fast)</option><option value="libx264">CPU (works everywhere)</option></select></label>
+        <label class="field">Record CS2 at <select id="resolution"><option value="1920x1080">1080p (1920 × 1080)</option><option value="2560x1440">1440p (2560 × 1440)</option></select>
+          <span class="muted small">1440p takes about 1.5× longer and needs a 1440p (or bigger) screen.</span></label>
+        <label class="field" id="output-height-field">Final video <select id="output-height"><option value="0">1440p</option><option value="1080">1080p (scaled down, extra sharp)</option></select>
+          <span class="muted small">Recording at 1440p and saving at 1080p gives a crisper 1080p video.</span></label>
+        <label class="field">Graphics while recording <select id="graphics"><option value="normal">Your own CS2 settings</option><option value="high">Very High (best looking)</option></select>
+          <span class="muted small">Very High is used only for the recording; your own settings come back right after.</span></label>
+        <label class="field">Encoder <select id="codec"><option value="auto">Automatic (recommended)</option><option value="h264_nvenc">NVIDIA GPU (NVENC)</option><option value="h264_vaapi">AMD / Intel GPU (VAAPI, experimental)</option><option value="libx264">CPU (works everywhere)</option></select>
+          <span class="muted small" id="codec-hint"></span></label>
         <label class="field">Quality <input type="range" id="quality" min="16" max="30"><span class="muted small" id="quality-label"></span></label>
       </div>
+      <p class="muted small">⚠ GPU encoding is tested on an NVIDIA RTX 3070 only. AMD/Intel support is a work in progress and not guaranteed; when a GPU encoder fails, the app switches to the CPU by itself. Most of the waiting is CS2 drawing the frames, so the encoder makes only a small difference.</p>
     </div>
 
     <div class="card">
@@ -237,21 +271,31 @@
       </ol>
       <h2>Queue</h2>
       <p>Tick several matches (or demos) and press <b>+ Add to queue</b> in the floating bar, or click <b>Add to queue</b> on a single match. They render one after another, each producing its clips and its own montage. On the Queue page you can reorder (↑ ↓), remove (✕) or pause. The queue is saved: if you close the app while it is working, it keeps going in the background; if the app is restarted, unfinished items wait until you press Start.</p>
+      <h2>What gets clipped</h2>
+      <p><b>Rounds</b> (Settings → What counts as a highlight): tick 3 kills, 4 kills, Ace and/or Won clutches. The whole round is recorded, with long pauses cut out. An ace means the whole enemy team, so it is 5 kills in Premier/Competitive and fewer in Wingman and Rush.</p>
+      <p><b>Special shots</b> are single kills that get their own short clip even when the round had nothing else: flicks, sniper flicks, spray transfers, long range kills, no-scopes, wallbangs, kills through smoke, jump shots and blind kills. Open the dropdown and tick what you want, or <i>Select all</i>. Flicks are measured from the demo: how far your crosshair moved in the fifth of a second before the first hit.</p>
       <h2>Video styles</h2>
       <p><b>Smooth · 120 fps</b>: every output frame is a real game frame. Crisp, smooth, and can be slowed down 2× in an editor without stutter.</p>
       <p><b>Motion blur · 60 fps</b>: CS2 renders 4× more frames (240 per second), and each group of 4 is averaged into one. Fast movement smears naturally like a real camera, the look of most frag movies. It takes about twice as long.</p>
+      <h2>Resolution and graphics</h2>
+      <p><b>Record CS2 at 1080p or 1440p.</b> With 1440p you can save the final video at 1440p, or at 1080p: scaling down from 1440p makes a noticeably sharper 1080p video. 1440p needs a screen of at least 2560 × 1440 and takes longer.</p>
+      <p><b>Graphics while recording.</b> "Very High" switches CS2 to Valve's Very High preset (high shaders, textures, particles, shadows, 8× MSAA, ambient occlusion, FSR off) just for the recording. Your own settings, display mode and resolution are put back as soon as CS2 closes, so you keep your low settings for playing.</p>
+      <h2>Encoder</h2>
+      <p>Automatic uses your NVIDIA card (NVENC) if you have one, AMD/Intel (VAAPI) otherwise, and the CPU as a fallback. GPU encoding is tested on an RTX 3070 only; other GPUs are a work in progress. Encoding takes seconds per clip; most of the time goes into CS2 drawing every frame.</p>
       <h2>How long does it take?</h2>
       <p>CS2 saves roughly 10–15 frames per second while recording, so a match with four highlights takes about 15 minutes (Smooth) or 30 minutes (Motion blur). The progress bar shows the time left.</p>
       <h2>Where do matches come from?</h2>
       <p><b>Steam matches</b> are split by mode (Ranked Competitive, Premier, Rush, Wingman, …) and come from your Steam "Personal Game Data" pages, the same ones with the <i>Download Replay</i> buttons. Replays are downloaded from Valve's replay servers. Those links are plain HTTP, which is why browsers call them unsafe; the files come straight from Valve. Valve deletes replays after a few weeks, so old matches show as expired.</p>
-      <p><b>Demos on this PC</b> are <code>.dem</code> files in your CS2 <code>replays</code> folder (in-game downloads, or any demo you copy there).</p>
+      <p><b>Demos on this PC</b> are <code>.dem</code> (or still-compressed <code>.dem.bz2</code>) files in your CS2 <code>replays</code> folder (in-game downloads, or any demo you copy there).</p>
+      <p><b>Already downloaded it yourself?</b> Use <b>Open on Steam ↗</b> above the match list to get to the Steam page with the <i>Download Replay</i> buttons. Put the file in the CS2 <code>replays</code> folder (or leave it in <code>~/Downloads</code>); when you queue that match, the app uses your copy instead of downloading it again, and never deletes it. Matches with a local copy show <span class="tag">💾 on this PC</span>.</p>
       <h2>Troubleshooting</h2>
       <dl>
         <dt>"The recording plugin did not start inside CS2"</dt><dd>A CS2 update changed something the plugin depends on. Update this app (<code>git pull</code> then <code>./install.sh</code>).</dd>
         <dt>CS2 opens but nothing happens / the game stays open</dt><dd>Use Cancel, then try again. If it keeps happening, run <code>cs2hl clean</code> in a terminal to remove the plugin from CS2.</dd>
         <dt>"You are not in this demo"</dt><dd>Only your own matches can be clipped. If you play on an account that never logged in on this PC, add its SteamID64 in Settings → Accounts.</dd>
         <dt>"Not enough disk space"</dt><dd>Frames are stored temporarily in the workspace folder. Free space there, or reinstall with the workspace on a bigger disk.</dd>
-        <dt>NVIDIA encoder errors</dt><dd>Switch Encoder to CPU in Settings. It is slower but works on any PC.</dd>
+        <dt>Encoder errors</dt><dd>The app already falls back to the CPU when a GPU encoder fails. If it still fails, set Encoder to CPU in Settings.</dd>
+        <dt>CS2 looks different after recording (windowed, low resolution)</dt><dd>The app restores your video settings when CS2 closes. If CS2 crashed, run <code>cs2hl clean</code> (or start any new recording) and they are put back.</dd>
         <dt>Steam login expired</dt><dd>Log in again on the Steam account page.</dd>
       </dl>
       <h2>Command line</h2>

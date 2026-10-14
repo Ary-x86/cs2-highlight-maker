@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, pipeline, steam
-from .config import WORK_DIR
+from .config import DOWNLOADS_DIR, WORK_DIR
 from .errors import FriendlyError, explain
 
 QUEUE_PATH = WORK_DIR / "queue.json"
@@ -260,16 +260,34 @@ def build(spec: dict):
     raise FriendlyError("Unknown job type", str(kind), "Remove it from the queue.")
 
 
+def _cleanup(cfg: config.Config, dem: Path, rep: pipeline.Reporter) -> None:
+    """Delete a demo this app downloaded or unpacked itself, unless the user keeps them."""
+    if not cfg.keep_downloaded_demos:
+        dem.unlink(missing_ok=True)
+        rep.note("Deleted the downloaded demo (change this in Settings → Keep downloaded demos).")
+
+
 def render_local(demo: Path, mode: str | None = None):
     def run(rep: pipeline.Reporter):
         if not demo.is_file():
             raise FriendlyError("Demo not found", str(demo), "It was moved or deleted; remove it from the queue.")
-        return pipeline.process(config.load(), demo, rep, mode)
+        cfg = config.load()
+        if demo.name.endswith(".bz2"):
+            rep.stage("Unpacking demo")
+            dem = steam.unpack(demo, progress=rep.progress)
+            try:
+                return pipeline.process(cfg, dem, rep, mode)
+            finally:
+                _cleanup(cfg, dem, rep)
+        return pipeline.process(cfg, demo, rep, mode)
     return run
 
 
 def render_match(match: steam.Match | None, mode: str | None = None):
-    """Download a match replay (or the newest one when match is None), render it, then drop the demo."""
+    """Get a match replay (newest one when match is None), render it, then drop the demo if we fetched it.
+
+    A copy already on the PC (replays folder, ~/Downloads, .dem or .dem.bz2) is used instead of downloading.
+    """
     def run(rep: pipeline.Reporter):
         cfg = config.load()
         session = steam.Session.load()
@@ -284,13 +302,22 @@ def render_match(match: steam.Match | None, mode: str | None = None):
                 raise FriendlyError("No downloadable matches", "Steam lists no recent match with a replay.",
                                     "Play a match first; replays expire after a few weeks.")
             rep.log(f"Latest: {target.mode} {target.map}, {target.time[:16].replace('T', ' ')} UTC, {target.score}")
-        rep.stage(f"Downloading {target.map} replay")
-        dem = steam.download(target, progress=rep.progress)
-        rep.log(f"Downloaded {dem.name} ({dem.stat().st_size / 1e6:.0f} MB)")
+        local = steam.find_local(target.id, steam.demo_search_dirs(cfg.replays_dir))
+        ours = True  # downloaded/unpacked by this app, so it may be deleted afterwards
+        if local and local.name.endswith(".bz2"):
+            rep.stage(f"Unpacking {target.map} replay")
+            rep.log(f"Found {local} on this PC, no download needed")
+            dem = steam.unpack(local, progress=rep.progress)
+        elif local:
+            rep.log(f"Using {local} already on this PC, no download needed")
+            dem, ours = local, local.parent == DOWNLOADS_DIR
+        else:
+            rep.stage(f"Downloading {target.map} replay")
+            dem = steam.download(target, progress=rep.progress)
+            rep.log(f"Downloaded {dem.name} ({dem.stat().st_size / 1e6:.0f} MB)")
         try:
             return pipeline.process(cfg, dem, rep, mode)
         finally:
-            if not cfg.keep_downloaded_demos:
-                dem.unlink(missing_ok=True)
-                rep.note("Deleted the downloaded demo (change this in Settings → Keep downloaded demos).")
+            if ours:
+                _cleanup(cfg, dem, rep)
     return run
