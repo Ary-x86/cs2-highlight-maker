@@ -1,0 +1,59 @@
+# Example settings for CS2 Highlight Maker.
+#
+# You normally never edit this by hand: the app's Settings page writes your real settings file, in the workspace:
+#   Linux    ~/.local/share/cs2hl/config.toml
+#   Windows  %LOCALAPPDATA%\cs2hl\config.toml
+# Copy this file there only if you want to set things up without the GUI. Missing keys use the defaults below.
+
+# Counter-Strike 2 folder ("Counter-Strike Global Offensive"). Empty = the install Steam updated most recently.
+cs2_dir = ""
+# Your SteamID64s. Empty = every Steam account that has logged in on this PC.
+steamids = []
+# Where clips/ and montages/ are saved. Empty = the workspace folder.
+output_dir = ""
+
+# smooth120: 120 fps, every frame a real game frame. blur60: rendered at 240 fps, blended to 60 fps motion blur.
+mode = "smooth120"
+# Size CS2 records at: 1920x1080 or 2560x1440 (needs a screen at least that big).
+width = 1920
+height = 1080
+# Final video height; 0 = same as recorded. 1080 with a 1440p recording gives an extra sharp 1080p video.
+output_height = 0
+# normal: your own CS2 graphics. high: Valve's Very High preset while recording, your settings come back after.
+graphics = "normal"
+# donk, classic or custom (see [custom_crosshair])
+crosshair = "donk"
+
+# What counts as a highlight. Rounds: "3k", "4k", "ace", "clutch".
+round_highlights = ["3k", "4k", "ace", "clutch"]
+# Single kills clipped on their own: "flick", "sniper_flick", "spray_transfer", "long_range", "noscope",
+# "wallbang", "smoke", "jumpshot", "blind"
+special_kills = []
+# Smallest clutch worth a clip (2 = 1v2 and up)
+clutch_min_enemies = 2
+pre_seconds = 3.0
+post_seconds = 2.0
+max_gap_seconds = 8.0
+
+# Delete demos downloaded from Steam once their highlights are rendered
+keep_downloaded_demos = false
+# auto, h264_nvenc (NVIDIA), h264_vaapi (AMD/Intel, Linux), h264_amf (AMD, Windows), h264_qsv (Intel, Windows),
+# libx264 (CPU)
+video_codec = "auto"
+# Lower = bigger, sharper files
+quality = 23
+# Seconds before giving up on a CS2 launch (plus the expected recording time)
+launch_timeout = 300
+
+[custom_crosshair]
+cl_crosshairstyle = 4
+cl_crosshairdot = 1
+cl_crosshair_t = 0
+cl_crosshair_length = 4
+cl_crosshair_gap = 2
+cl_crosshair_thickness = 2
+cl_crosshair_drawoutline = 1
+cl_crosshaircolor_r = 0
+cl_crosshaircolor_g = 255
+cl_crosshaircolor_b = 0
+cl_crosshaircolor_a = 255

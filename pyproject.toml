@@ -2,11 +2,26 @@
 name = "cs2hl"
 version = "0.1.0"
 description = "Automatic CS2 highlight clips from demos, rendered frame-by-frame inside CS2"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Aryan Swami-Persaud"}]
 requires-python = ">=3.11"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Games/Entertainment :: First Person Shooters",
+]
 dependencies = [
     "demoparser2>=0.40",
     "segno>=1.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Ary-x86/cs2-highlight-maker"
+Issues = "https://github.com/Ary-x86/cs2-highlight-maker/issues"
 
 [project.scripts]
 cs2hl = "cs2hl.cli:main"

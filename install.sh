@@ -21,7 +21,7 @@ done
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = Linux ] || fail "Only Linux is supported (CS2 runs natively there)."
+[ "$(uname -s)" = Linux ] || fail "This installer is for Linux. On Windows, use the installer from the Releases page; macOS has no CS2."
 
 # --- system packages ----------------------------------------------------------------------------
 missing=()
