@@ -13,7 +13,7 @@ A free alternative to Leetify-style highlight clips that runs on your own PC. Lo
 
 - **Smooth recording.** CS2 itself renders every frame at a fixed frame rate: 120 fps, or 240 fps blended down to 60 fps for motion blur. It isn't screen capture, so a busy PC can't make it stutter.
 - **Downloads your matches for you.** Ranked Competitive, Premier, Rush, Wingman and other replays come from your Steam match history and are deleted after rendering. If you already downloaded a replay yourself, the app uses that copy.
-- **You pick what counts.** Choose 3k, 4k, ace or clutch rounds. Optional special shots: flicks, sniper flicks, spray transfers, long range kills, no-scopes, wallbangs, kills through smoke, jump shots and blind kills.
+- **You pick what counts.** Choose 3k, 4k, ace or clutch rounds. Optional special shots: flicks, sniper flicks, spray transfers, long range kills, no-scopes, wallbangs, kills through smoke, jump shots, blind kills, kills right after pushing out of a smoke, and pistol headshots against rifles.
 - **Queue and montages.** Tick several matches and they render one after another. Each match gets its own clips and montage.
 - **1080p or 1440p, your graphics or Very High.** Record at 1440p and save at 1080p for extra sharpness. Graphics are raised only while recording, and your own settings come back afterwards.
 - **Crosshairs.** Use donk's, a classic one, or build your own. There's a live preview.
@@ -90,6 +90,18 @@ Everything is also explained on the in-app **Help** page. The setup screen can b
 | Smooth · 120 fps (default) | every game frame is kept | crisp; can be slowed down 2× in an editor |
 | Motion blur · 60 fps | 240 fps rendered, 4 frames averaged per output frame | soft, cinematic blur on fast flicks; about 2× slower |
 
+Motion blur strength goes from 1× to 2×. Above 1×, each output frame also blends part of the previous one (1.5× averages 6 rendered frames, 2× averages 8), so the smear gets longer. Recording time stays the same.
+
+### File quality
+
+| | how | for |
+|---|---|---|
+| Standard (default) | JPG frames from CS2, normal encode (~45 Mbit/s at 1440p) | everyday clips |
+| Clean | lossless TGA frames, packed on the fly into visually lossless chunks so they never fill the disk; lower quality number, look-ahead and adaptive quantisation in the final encode | no blocking in fast motion, cleaner colours around the crosshair; files 2–3× bigger. Optional full colour (4:4:4) keeps thin coloured lines perfectly clean, but plays only in VLC, mpv and editors |
+| Small files | H.264 (x264 on the CPU), AAC, 60 fps; 5 levels from 720p (~3.5 MB per 15 s) to 1080p (~16 MB per 15 s) | WhatsApp, Discord, phones, or low disk space |
+
+All profiles write standard BT.709 colour, so phones and browsers show the same colours as desktop players.
+
 ### Encoders
 
 **Automatic** picks a GPU encoder and falls back to the CPU if that one fails:
@@ -120,11 +132,12 @@ Your settings file is created the first time you finish the setup screen. [`conf
 1. [demoparser2](https://github.com/LaihoE/demoparser) finds the rounds and kills you picked in Settings.
    - By default that's 3k, 4k, aces and won 1v2+ clutches.
    - Flicks are measured from your view angles in the 0.2 s before the first hit.
+   - Smoke pushes compare your position with every active smoke in the 3 s before a kill.
    - Spray transfers come from continuous `weapon_fire` events.
    - Long pauses between kills are cut out.
 2. The [CS Demo Manager](https://github.com/akiver/cs-demo-manager) CS2 server plugin runs console commands at given demo ticks.
    - The app loads the plugin into CS2 only for the recording. CS2 starts with `-insecure`, which turns VAC off for that session, so there's no ban risk.
-   - CS2 then seeks to each highlight, spectates you and records with `startmovie … jpg wav` at a locked `host_framerate`.
+   - CS2 then seeks to each highlight, spectates you and records with `startmovie … jpg wav` (or `tga wav` for Clean) at a locked `host_framerate`.
 3. FFmpeg encodes the frames, joins multi-part highlights and builds the montage.
 
 The upstream plugin stopped running tick actions after the 2026-08-19 CS2 update ([cs-demo-manager#1458](https://github.com/akiver/cs-demo-manager/issues/1458)). [`plugin/frame-hook.patch`](plugin/frame-hook.patch) fixes that. [`plugin/build.sh`](plugin/build.sh) (Linux) and [`plugin/build.ps1`](plugin/build.ps1) (Windows) build the patched plugin.

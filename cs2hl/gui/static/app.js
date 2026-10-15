@@ -112,6 +112,7 @@ function fillSettings() {
     drawCrosshair($("canvas", el), crosshairCvars(el.dataset.xhair), 3);
   });
   fillCustomEditor();
+  fillVideoQuality();
 
   const sel = $("#cs2-select");
   const opts = [["", `Automatic (${S.installs[0] ? S.installs[0].path : "none found"})`]];
@@ -140,11 +141,51 @@ function fillSettings() {
   $("#codec-hint").textContent = c.video_codec === "auto" ? "NVIDIA → AMD/Intel → CPU, whichever works first." : "";
   $("#quality").value = c.quality;
   qualityLabel();
+  $("#quality-note").textContent = c.video_profile === "clean" ? `Clean encodes at ${Math.max(10, c.quality - 6)} by itself (sharper).`
+    : c.video_profile === "compact" ? "Small files use their own size levels (File quality above) and the CPU encoder." : "";
   $("#steamids").value = c.steamids.join(", ");
   $("#accounts").innerHTML = S.accounts.length
     ? S.accounts.map((a) => `<span class="tag">${esc(a.name)} · ${esc(a.steamid)}</span>`).join(" ")
     : `<span class="muted">No Steam accounts found on this PC.</span>`;
 }
+
+// Motion blur strength and File quality (older app versions don't have these settings)
+const BLUR_STEPS = [1, 1.25, 1.5, 1.75, 2];
+const COMPACT_LABELS = {
+  1: "1 · 720p, smallest: about 3.5 MB per 15 seconds of action",
+  2: "2 · 720p: about 5 MB per 15 s",
+  3: "3 · 720p, sweet spot: about 7.5 MB per 15 s, close to the original on a phone",
+  4: "4 · 1080p: about 11 MB per 15 s",
+  5: "5 · 1080p, best looking: about 16 MB per 15 s",
+};
+function fillVideoQuality() {
+  const c = S.config, known = c.video_profile !== undefined;
+  $("#profile-cards").closest(".card").classList.toggle("hidden", !known);
+  $("#blur-field").classList.toggle("hidden", !known || c.mode !== "blur60");
+  if (!known) return;
+  $$("#profile-cards .choice").forEach((el) => {
+    el.classList.toggle("selected", el.dataset.profile === c.video_profile);
+    $("input", el).checked = el.dataset.profile === c.video_profile;
+  });
+  $("#compact-field").classList.toggle("hidden", c.video_profile !== "compact");
+  $("#fullcolor-field").classList.toggle("hidden", c.video_profile !== "clean");
+  $("#compact-level").value = c.compact_level;
+  $("#full-color").checked = c.full_color;
+  $("#blur-strength").value = Math.max(0, BLUR_STEPS.indexOf(c.blur_strength));
+  blurLabel();
+  compactLabel();
+}
+function blurLabel() {
+  const s = BLUR_STEPS[+$("#blur-strength").value];
+  $("#blur-label").textContent = `${s}× · ${s === 1 ? "standard (4 frames per frame)" : `${Math.round(4 * s)} frames per frame${s >= 1.75 ? ", very smeary" : ""}`}`;
+}
+function compactLabel() { $("#compact-label").textContent = COMPACT_LABELS[+$("#compact-level").value]; }
+$$("#profile-cards input").forEach((i) => (i.onchange = () => save({ video_profile: i.value })));
+$("#blur-strength").oninput = blurLabel;
+$("#blur-strength").onchange = (e) => save({ blur_strength: BLUR_STEPS[+e.target.value] });
+$("#compact-level").oninput = compactLabel;
+$("#compact-level").onchange = (e) => save({ compact_level: +e.target.value });
+$("#full-color").onchange = (e) => save({ full_color: e.target.checked });
 
 const CODEC_LABELS = {
   auto: "Automatic (recommended)", h264_nvenc: "NVIDIA GPU (NVENC)", h264_vaapi: "AMD / Intel GPU (VAAPI, experimental)",

@@ -119,6 +119,43 @@
           <p>CS2 renders 240 fps and every 4 frames are blended into one. Fast flicks get the soft, cinematic blur of frag movies. Takes about twice as long.</p>
         </label>
       </div>
+      <div class="sub-setting" id="blur-field">
+        <label class="field">Motion blur strength
+          <input type="range" id="blur-strength" min="0" max="4" step="1">
+          <span class="muted small" id="blur-label"></span></label>
+        <p class="muted small">Above 1× every frame also blends in part of the frame before it, so flicks smear longer. It costs nothing: recording takes just as long.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>File quality</h2>
+      <div class="choices three" id="profile-cards">
+        <label class="choice" data-profile="standard">
+          <input type="radio" name="profile" value="standard">
+          <b>Standard</b>
+          <p>Good looking clips at a normal size (about 45 Mbit/s at 1440p). Recommended for most people.</p>
+        </label>
+        <label class="choice" data-profile="clean">
+          <input type="radio" name="profile" value="clean">
+          <b>Clean · highest quality</b>
+          <p>CS2 saves lossless frames and the encoder works harder: no blocky patches in fast motion and cleaner colours around the crosshair. Files are 2–3× bigger and recording is a little slower.</p>
+        </label>
+        <label class="choice" data-profile="compact">
+          <input type="radio" name="profile" value="compact">
+          <b>Small files · for sharing</b>
+          <p>Plain H.264 MP4 at 60 fps that plays everywhere: WhatsApp, Discord, phones. Also handy when disk space is tight. Recorded the same way; only the final file is smaller.</p>
+        </label>
+      </div>
+      <div class="sub-setting" id="compact-field">
+        <label class="field">File size
+          <input type="range" id="compact-level" min="1" max="5" step="1">
+          <span class="ticks"><span>smallest</span><span>sweet spot</span><span>best looking</span></span>
+          <span class="muted small" id="compact-label"></span></label>
+      </div>
+      <div class="sub-setting" id="fullcolor-field">
+        <label class="check"><input type="checkbox" id="full-color"> Full colour detail (4:4:4)</label>
+        <p class="muted small">Keeps every pixel's colour, so a thin coloured crosshair stays perfectly clean. Plays in VLC, mpv and video editors (Premiere, DaVinci Resolve), but <b>not</b> on phones, in browsers or in WhatsApp. NVIDIA or CPU encoder only.</p>
+      </div>
     </div>
 
     <div class="card">
@@ -191,6 +228,8 @@
           <label><input type="checkbox" value="smoke"><span><b>Through smoke</b><em>Kills through a smoke grenade</em></span></label>
           <label><input type="checkbox" value="jumpshot"><span><b>Jump shots</b><em>Kills while in the air</em></span></label>
           <label><input type="checkbox" value="blind"><span><b>Blind kills</b><em>Kills while flashed</em></span></label>
+          <label><input type="checkbox" value="smoke_push"><span><b>Out of a smoke</b><em>Kills within 3 seconds after you walked out of a smoke</em></span></label>
+          <label><input type="checkbox" value="pistol_vs_rifle"><span><b>Pistol vs rifle</b><em>Pistol headshot kills on someone holding a rifle or AWP</em></span></label>
         </div>
       </details>
 
@@ -213,7 +252,8 @@
           <span class="muted small">Very High is used only for the recording; your own settings come back right after.</span></label>
         <label class="field">Encoder <select id="codec"></select>
           <span class="muted small" id="codec-hint"></span></label>
-        <label class="field">Quality <input type="range" id="quality" min="16" max="30"><span class="muted small" id="quality-label"></span></label>
+        <label class="field">Quality <input type="range" id="quality" min="16" max="30"><span class="muted small" id="quality-label"></span>
+          <span class="muted small" id="quality-note"></span></label>
       </div>
       <p class="muted small">⚠ GPU encoding is tested on an NVIDIA RTX 3070 only. AMD/Intel support is a work in progress and not guaranteed; when a GPU encoder fails, the app switches to the CPU by itself. Most of the waiting is CS2 drawing the frames, so the encoder makes only a small difference.</p>
     </div>
@@ -274,10 +314,15 @@
       <p>Tick several matches (or demos) and press <b>+ Add to queue</b> in the floating bar, or click <b>Add to queue</b> on a single match. They render one after another, each producing its clips and its own montage. On the Queue page you can reorder (↑ ↓), remove (✕) or pause. The queue is saved: if you close the app while it is working, it keeps going in the background; if the app is restarted, unfinished items wait until you press Start.</p>
       <h2>What gets clipped</h2>
       <p><b>Rounds</b> (Settings → What counts as a highlight): tick 3 kills, 4 kills, Ace and/or Won clutches. The whole round is recorded, with long pauses cut out. An ace means the whole enemy team, so it is 5 kills in Premier/Competitive and fewer in Wingman and Rush.</p>
-      <p><b>Special shots</b> are single kills that get their own short clip even when the round had nothing else: flicks, sniper flicks, spray transfers, long range kills, no-scopes, wallbangs, kills through smoke, jump shots and blind kills. Open the dropdown and tick what you want, or <i>Select all</i>. Flicks are measured from the demo: how far your crosshair moved in the fifth of a second before the first hit.</p>
+      <p><b>Special shots</b> are single kills that get their own short clip even when the round had nothing else: flicks, sniper flicks, spray transfers, long range kills, no-scopes, wallbangs, kills through smoke, jump shots, blind kills, kills right after pushing out of a smoke, and pistol headshots against rifles. Open the dropdown and tick what you want, or <i>Select all</i>. Flicks are measured from the demo: how far your crosshair moved in the fifth of a second before the first hit.</p>
       <h2>Video styles</h2>
       <p><b>Smooth · 120 fps</b>: every output frame is a real game frame. Crisp, smooth, and can be slowed down 2× in an editor without stutter.</p>
       <p><b>Motion blur · 60 fps</b>: CS2 renders 4× more frames (240 per second), and each group of 4 is averaged into one. Fast movement smears naturally like a real camera, the look of most frag movies. It takes about twice as long.</p>
+      <p><b>Motion blur strength</b>: at 1× each video frame blends exactly the 4 rendered frames that belong to it (like a camera with its shutter open the whole time). 1.5× blends 6, reaching back into the previous frame, so the smear is 1.5× longer; 2× blends 8. Stronger blur is free: CS2 renders the same frames either way.</p>
+      <h2>File quality</h2>
+      <p><b>Standard</b>: CS2 saves each frame as a top-quality JPG and your encoder turns them into an MP4. Looks good; very fast movement can show faint blocks, and thin coloured lines (like a cyan crosshair) can look slightly smeared, because both JPG and normal MP4 store colour at half resolution.</p>
+      <p><b>Clean</b>: CS2 saves lossless TGA frames instead. Those are huge (about 11 MB each at 1440p), so while CS2 records the app packs them into a visually lossless video and deletes them, a few seconds behind. The final encode then uses a lower quality number, look-ahead and adaptive quantisation, which removes the blocking. Files are 2–3× bigger. <i>Full colour detail (4:4:4)</i> also keeps colour at full resolution for a perfectly clean crosshair, but those files only play in VLC, mpv and editors.</p>
+      <p><b>Small files</b>: made for sharing. Always H.264 at 60 fps with AAC sound, encoded by x264 on the CPU (it makes much smaller files than GPU encoders at the same quality). Levels 1–3 are 720p, 4–5 are 1080p. Level 3 is the sweet spot: it looks close to the original on a phone at a fraction of the size.</p>
       <h2>Resolution and graphics</h2>
       <p><b>Record CS2 at 1080p or 1440p.</b> With 1440p you can save the final video at 1440p, or at 1080p: scaling down from 1440p makes a noticeably sharper 1080p video. 1440p needs a screen of at least 2560 × 1440 and takes longer.</p>
       <p><b>Graphics while recording.</b> "Very High" switches CS2 to Valve's Very High preset (high shaders, textures, particles, shadows, ambient occlusion, FSR off; CMAA2 anti-aliasing, because MSAA breaks the colours of recorded frames) just for the recording. Your own settings, display mode and resolution are put back as soon as CS2 closes, so you keep your low settings for playing.</p>
