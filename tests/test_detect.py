@@ -63,3 +63,48 @@ class SpecialKillTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PositionParser:
+    """Fake demo with one smoke at the origin and the POV player walking out of it along x."""
+
+    def __init__(self, path, victim_weapon="AK-47"):
+        self.path, self.victim_weapon = path, victim_weapon  # path: tick -> x of the POV player
+
+    def parse_event(self, name):
+        if name == "smokegrenade_detonate":
+            return pd.DataFrame({"tick": [0], "entityid": [7], "x": [0.0], "y": [0.0], "z": [0.0]})
+        if name == "smokegrenade_expired":
+            return pd.DataFrame({"tick": [64 * 20], "entityid": [7]})
+        return pd.DataFrame()
+
+    def parse_ticks(self, props, ticks):
+        rows = []
+        for t in ticks:
+            rows.append((t, POV, self.path(t), "Desert Eagle"))
+            rows.append((t, "1", 900.0, self.victim_weapon))
+        return pd.DataFrame({"tick": [r[0] for r in rows], "steamid": [r[1] for r in rows], "X": [r[2] for r in rows],
+                             "Y": [0.0] * len(rows), "Z": [0.0] * len(rows),
+                             "active_weapon_name": [r[3] for r in rows]})
+
+
+class PositionRuleTest(unittest.TestCase):
+    def test_kill_after_walking_out_of_smoke(self):
+        k = kill(640)  # inside the smoke until tick 600, then out
+        detect.tag_special_kills(PositionParser(lambda t: 0.0 if t < 600 else 300.0), POV, [k], {"smoke_push"}, 64)
+        self.assertEqual(k.flags, ["smoke_push"])
+
+    def test_no_smoke_push_from_inside_or_far_away(self):
+        inside, never = kill(640), kill(640)
+        detect.tag_special_kills(PositionParser(lambda t: 0.0), POV, [inside], {"smoke_push"}, 64)
+        detect.tag_special_kills(PositionParser(lambda t: 600.0), POV, [never], {"smoke_push"}, 64)
+        self.assertEqual(inside.flags + never.flags, [])
+
+    def test_pistol_headshot_against_rifle(self):
+        hs = detect.Kill(640, "deagle", "1", True, [], "1")
+        body = detect.Kill(640, "deagle", "1", False, [], "1")
+        vs_pistol = detect.Kill(640, "deagle", "1", True, [], "1")
+        far = lambda t: 600.0  # noqa: E731
+        detect.tag_special_kills(PositionParser(far), POV, [hs, body], {"pistol_vs_rifle"}, 64)
+        detect.tag_special_kills(PositionParser(far, "Glock-18"), POV, [vs_pistol], {"pistol_vs_rifle"}, 64)
+        self.assertEqual((hs.flags, body.flags, vs_pistol.flags), (["pistol_vs_rifle"], [], []))

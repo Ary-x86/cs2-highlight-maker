@@ -37,7 +37,7 @@ RESOLUTIONS = ((1920, 1080), (2560, 1440))
 ROUND_TYPES = ("3k", "4k", "ace", "clutch")
 # Single kills worth a clip on their own (see detect.SPECIAL_RULES).
 SPECIAL_KILLS = ("flick", "sniper_flick", "spray_transfer", "long_range", "noscope", "wallbang", "smoke",
-                 "jumpshot", "blind")
+                 "jumpshot", "blind", "smoke_push", "pistol_vs_rifle")
 
 DEFAULT_CUSTOM_CROSSHAIR = {
     "cl_crosshairstyle": 4,

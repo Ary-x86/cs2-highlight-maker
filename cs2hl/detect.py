@@ -21,6 +21,9 @@ ACE_SCORE = 8.0
 SNIPERS = {"awp", "ssg08"}
 AUTOMATICS = {"ak47", "m4a1", "m4a1_silencer", "m4a4", "galilar", "famas", "aug", "sg556", "mac10", "mp9", "mp7",
               "mp5sd", "ump45", "p90", "bizon", "negev", "m249", "cz75a"}
+PISTOLS = {"deagle", "revolver", "usp_silencer", "hkp2000", "glock", "p250", "fiveseven", "tec9", "cz75a", "elite"}
+# active_weapon_name of the victim, lowercased with everything but letters and digits removed
+RIFLES_HELD = {"ak47", "m4a4", "m4a1s", "m4a1", "galilar", "famas", "aug", "sg553", "awp", "ssg08", "scar20", "g3sg1"}
 NOT_AIMED = {"hegrenade", "inferno", "molotov", "incgrenade", "flashbang", "smokegrenade", "decoy", "world",
              "planted_c4", "c4"}
 
@@ -31,6 +34,11 @@ LONG_RANGE_METERS = 40.0
 SPRAY_TRANSFER_SECONDS = 1.5
 SPRAY_MAX_PAUSE = 0.3       # longer gap between shots ends the spray
 HIT_CHAIN_GAP = 0.5         # hits closer than this belong to the same fight
+SMOKE_RADIUS = 140.0        # units around a smoke's centre that count as inside it
+SMOKE_HEIGHT = 120.0
+SMOKE_BLOOM = 1.0           # seconds after the pop before a smoke is thick enough to hide in
+SMOKE_PUSH_SECONDS = 3.0    # kill this soon after walking out of a smoke
+SMOKE_LIFETIME = 22.0       # fallback when the demo has no smokegrenade_expired event
 
 # Special kill types, the label used in clip names and the score they add.
 SPECIAL_RULES = {
@@ -43,7 +51,11 @@ SPECIAL_RULES = {
     "smoke": ("smoke", 1.0),
     "jumpshot": ("jumpshot", 1.0),
     "blind": ("blind", 1.5),
+    "smoke_push": ("smokepush", 1.5),
+    "pistol_vs_rifle": ("pistolvsrifle", 1.0),
 }
+# Rules that need the players' positions or weapons around each kill.
+POSITION_RULES = {"smoke_push", "pistol_vs_rifle"}
 
 
 class NotYourMatch(ValueError):
@@ -157,8 +169,63 @@ def _event(parser: DemoParser, name: str, steamid: str):
     return [r for _, r in df.sort_values("tick").iterrows()]
 
 
+def _smokes(parser: DemoParser, tickrate: int) -> list[tuple[int, int, float, float, float]]:
+    """(thick from tick, gone at tick, x, y, z) of every smoke grenade."""
+    try:
+        pops = parser.parse_event("smokegrenade_detonate")
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        gone = parser.parse_event("smokegrenade_expired")
+        ends = {int(e): int(t) for e, t in zip(gone["entityid"], gone["tick"])}
+    except Exception:  # noqa: BLE001
+        ends = {}
+    if pops is None or pops.empty:
+        return []
+    return [(int(t) + round(SMOKE_BLOOM * tickrate), ends.get(int(e), int(t) + round(SMOKE_LIFETIME * tickrate)),
+             float(x), float(y), float(z))
+            for t, e, x, y, z in zip(pops["tick"], pops["entityid"], pops["x"], pops["y"], pops["z"])]
+
+
+def tag_position_kills(parser: DemoParser, pov: str, kills: list[Kill], wanted: set[str], tickrate: int) -> None:
+    """smoke_push: kill right after walking out of a smoke. pistol_vs_rifle: pistol headshot kill on someone holding
+    a rifle or sniper."""
+    if not kills or not wanted & POSITION_RULES:
+        return
+    smokes = _smokes(parser, tickrate) if "smoke_push" in wanted else []
+    window = range(-round(SMOKE_PUSH_SECONDS * tickrate), -tickrate // 4, 4)
+    ticks = {k.tick - 1 for k in kills}
+    if smokes:
+        ticks |= {k.tick + d for k in kills for d in window}
+    df = parser.parse_ticks(["X", "Y", "Z", "active_weapon_name"], ticks=sorted(t for t in ticks if t > 0))
+    sid = df["steamid"].astype(str)
+    weapons = df["active_weapon_name"] if "active_weapon_name" in df else [None] * len(df)
+    pos, held = {}, {}
+    for s, t, x, y, z, w in zip(sid, df["tick"], df["X"], df["Y"], df["Z"], weapons):
+        if s == pov:
+            pos[int(t)] = (float(x), float(y), float(z))
+        held[(s, int(t))] = w
+
+    def in_smoke(tick: int) -> bool:
+        p = pos.get(tick)
+        return p is not None and any(
+            a <= tick <= b and math.hypot(p[0] - x, p[1] - y) < SMOKE_RADIUS and abs(p[2] - z) < SMOKE_HEIGHT
+            for a, b, x, y, z in smokes)
+
+    for k in kills:
+        if smokes and "smoke" not in k.flags and not in_smoke(k.tick - 1) \
+                and any(in_smoke(k.tick + d) for d in window):
+            k.flags.append("smoke_push")
+        if "pistol_vs_rifle" in wanted and k.weapon in PISTOLS and k.headshot:
+            name = "".join(c for c in str(held.get((k.victim_steamid, k.tick - 1)) or "").lower() if c.isalnum())
+            if name in RIFLES_HELD:
+                k.flags.append("pistol_vs_rifle")
+
+
 def tag_special_kills(parser: DemoParser, pov: str, kills: list[Kill], wanted: set[str], tickrate: int) -> None:
-    """Add flick / sniper_flick / spray_transfer to Kill.flags (the others come straight from player_death)."""
+    """Add flick / sniper_flick / spray_transfer / smoke_push / pistol_vs_rifle to Kill.flags (the others come
+    straight from player_death)."""
+    tag_position_kills(parser, pov, kills, wanted, tickrate)
     if not kills or not wanted & {"flick", "sniper_flick", "spray_transfer"}:
         return
 
