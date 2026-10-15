@@ -110,6 +110,7 @@ class Cs2:
         # frames land in csgo/csdm/movie, audio in csgo/movie; both are redirected to raw_dir
         self.frames_link = self.plugin_dir / "movie"
         self.audio_link = self.csgo / "movie"
+        self.packer = None  # encode.FramePacker while recording lossless TGA frames
 
     @staticmethod
     def is_running() -> bool:
@@ -159,7 +160,7 @@ class Cs2:
 
     @staticmethod
     def actions(clips: list[Clip], framerate: int, crosshair: str = "donk", custom_crosshair: dict | None = None,
-                restore: list[str] = (), tickrate: int = 64) -> list[dict]:
+                restore: list[str] = (), tickrate: int = 64, image_format: str = "jpg") -> list[dict]:
         sequences = []
         for i, clip in enumerate(clips):
             setup = max(SETUP_TICK + 1, clip.start_tick - tickrate)
@@ -179,7 +180,7 @@ class Cs2:
             acts += [(clip.start_tick, c) for c in (
                 "spec_mode 1",
                 f"spec_player {clip.player_slot}",
-                f"startmovie {clip.name} jpg wav",
+                f"startmovie {clip.name} {image_format} wav",
             )]
             acts.append((clip.end_tick, "endmovie"))
             if i == len(clips) - 1:
@@ -211,10 +212,10 @@ class Cs2:
                             "In Steam, open Library → Tools and install 'Steam Linux Runtime 3.0 (sniper)'.")
 
     def _frames_done(self) -> int:
-        count = 0
+        count = self.packer.packed if self.packer else 0
         for take in self.raw_dir.iterdir() if self.raw_dir.exists() else ():
             if take.is_dir():
-                count += sum(1 for e in os.scandir(take) if e.name.endswith(".jpg"))
+                count += sum(1 for e in os.scandir(take) if e.name.endswith((".jpg", ".tga")))
         return count
 
     def _plugin_hooked(self) -> bool:
@@ -225,10 +226,12 @@ class Cs2:
 
     def record(self, demo: Path, clips: list[Clip], framerate: int, width: int, height: int,
                timeout: float, crosshair: str = "donk", custom_crosshair: dict | None = None,
-               video_changes: dict | None = None, log=print, progress=None) -> None:
+               video_changes: dict | None = None, log=print, progress=None, image_format: str = "jpg",
+               packer=None) -> None:
         """Play demo, record every clip, return once the game has quit.
 
         video_changes are cs2_video.txt settings used only for this session (e.g. higher graphics quality).
+        image_format "tga" records lossless frames; packer (encode.FramePacker) then converts them while recording.
         progress(frames_done, frames_total) is called every couple of seconds while recording.
         """
         if " " in str(demo) and not system.IS_WINDOWS:
@@ -246,7 +249,7 @@ class Cs2:
         total = sum(round((c.end_tick - c.start_tick) / tickrate * framerate) for c in clips)
         actions_file = Path(str(demo) + ".json")
         actions_file.write_text(json.dumps(
-            self.actions(clips, framerate, crosshair, custom_crosshair, restore), indent=1))
+            self.actions(clips, framerate, crosshair, custom_crosshair, restore, image_format=image_format), indent=1))
         self.install()
         video.apply(video_changes or {})
         self.plugin_log().unlink(missing_ok=True)
@@ -259,6 +262,9 @@ class Cs2:
         cwd = {"cwd": str(Path(cmd[0]).parent)} if system.IS_WINDOWS else {}
         proc = subprocess.Popen(cmd, env=env, stdout=console, stderr=subprocess.STDOUT, **cwd)
         started = time.monotonic()
+        self.packer = packer
+        if packer:
+            packer.start()
         try:
             deadline = started + timeout
             hooked = False
@@ -285,6 +291,8 @@ class Cs2:
         except BaseException:
             self.kill()
             usercfg.restore_backup(cfg_dir, cfg_backup)
+            if packer:
+                packer.stop()
             raise
         finally:
             console.close()
@@ -292,6 +300,13 @@ class Cs2:
             video.restore()
             self.uninstall()
             actions_file.unlink(missing_ok=True)
+        if packer:
+            try:
+                packer.finish()
+            except Exception as e:  # noqa: BLE001
+                raise FriendlyError("Could not pack the lossless frames",
+                                    f"ffmpeg failed while converting the recording: {getattr(e, 'stderr', '') or e}",
+                                    "Switch Settings → Quality → Video quality back to Standard and try again.") from e
         if progress:
             progress(self._frames_done(), total)
         if self._frames_done() == 0:

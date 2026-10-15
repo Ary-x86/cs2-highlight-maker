@@ -21,13 +21,22 @@ height = 1080
 output_height = 0
 # normal: your own CS2 graphics. high: Valve's Very High preset while recording, your settings come back after.
 graphics = "normal"
+# standard: what most players want. clean: lossless recording and a sharper encode (no blocky patches or colour
+# smearing around the crosshair; bigger files, slower). compact: small H.264 files for WhatsApp and the like.
+video_profile = "standard"
+# compact only: 1 = smallest files (720p) ... 5 = best looking (1080p). 3 is the sweet spot.
+compact_level = 3
+# clean only: keep full colour detail (4:4:4). Plays in VLC, mpv and video editors, not on phones or in browsers.
+full_color = false
+# blur60 only: 1.0, 1.25, 1.5, 1.75 or 2.0. Above 1.0 each frame also blends part of the previous one.
+blur_strength = 1.0
 # donk, classic or custom (see [custom_crosshair])
 crosshair = "donk"
 
 # What counts as a highlight. Rounds: "3k", "4k", "ace", "clutch".
 round_highlights = ["3k", "4k", "ace", "clutch"]
 # Single kills clipped on their own: "flick", "sniper_flick", "spray_transfer", "long_range", "noscope",
-# "wallbang", "smoke", "jumpshot", "blind"
+# "wallbang", "smoke", "jumpshot", "blind", "smoke_push", "pistol_vs_rifle"
 special_kills = []
 # Smallest clutch worth a clip (2 = 1v2 and up)
 clutch_min_enemies = 2

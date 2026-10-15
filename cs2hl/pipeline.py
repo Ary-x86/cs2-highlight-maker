@@ -15,6 +15,10 @@ from .errors import FriendlyError
 from .game import Clip, Cs2
 
 AVG_JPG_BYTES = 250_000  # 1080p frame at jpeg_quality 100 is ~160KB; leave headroom
+# Clean mode: packed 1080p frame (x264 4:4:4, CRF 4) is ~0.5 MB; TGA frames waiting to be packed need a buffer.
+AVG_PACKED_BYTES = 700_000
+TGA_BUFFER_BYTES = 4_000_000_000
+PROFILE_SUFFIX = {"standard": "", "clean": "_clean", "compact": "_small"}
 
 
 class Reporter:
@@ -166,7 +170,9 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
     raw_dir = WORK_DIR / "tmp/raw" / demo.stem
     shutil.rmtree(raw_dir, ignore_errors=True)
     raw_dir.parent.mkdir(parents=True, exist_ok=True)
-    need = frames * AVG_JPG_BYTES * (cfg.width * cfg.height) / (1920 * 1080) * 1.2
+    clean = cfg.video_profile == "clean"
+    per_frame = AVG_PACKED_BYTES if clean else AVG_JPG_BYTES
+    need = frames * per_frame * (cfg.width * cfg.height) / (1920 * 1080) * 1.2 + (TGA_BUFFER_BYTES if clean else 0)
     free = shutil.disk_usage(raw_dir.parent).free
     if free < need:
         raise FriendlyError("Not enough disk space",
@@ -203,22 +209,33 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
     timeout = cfg.launch_timeout + frames / 5 + 30 * len(clips)
     if cfg.graphics == "high":
         rep.log("Using Very High graphics for the recording; your own settings come back afterwards")
+    packer = encode.FramePacker(raw_dir, spec["render_fps"]) if clean else None
+    if clean:
+        rep.log("Clean quality: recording lossless frames (packed on the fly, so this takes a bit longer)")
     game.record(playable_link(demo), clips, spec["render_fps"], cfg.width, cfg.height, timeout,
                 crosshair=cfg.crosshair, custom_crosshair=cfg.custom_crosshair,
                 video_changes=videocfg.recording_changes(usercfg.active_account_cfg_dir(), cfg.graphics == "high"),
-                log=rep.log, progress=on_frames)
+                log=rep.log, progress=on_frames, image_format="tga" if clean else "jpg", packer=packer)
     rep.log(f"Recorded {len(clips)} take(s) in {fmt_duration(time.monotonic() - started)}")
 
     rep.stage("Encoding clips")
     out_dir = cfg.clips_dir / match_folder(info)
-    suffix = "" if mode == "smooth120" else f"_{mode}"
+    suffix = ("" if mode == "smooth120" else f"_{mode}") + PROFILE_SUFFIX[cfg.video_profile]
     outputs: list[Path] = []
     codecs = encode.codec_chain(cfg.video_codec)
-    rep.log(f"Encoder: {encode.CODEC_NAMES[codecs[0]]}, {cfg.final_height}p")
+    if cfg.video_profile == "compact":
+        codecs = ["libx264"]
+        out_h = min(encode.COMPACT_LEVELS[cfg.compact_level][0], cfg.final_height)
+        rep.log(f"Encoder: {encode.CODEC_NAMES['libx264']}, small file size level {cfg.compact_level}/5, {out_h}p")
+    else:
+        rep.log(f"Encoder: {encode.CODEC_NAMES[codecs[0]]}, {cfg.final_height}p"
+                + (", clean quality" if clean else ""))
+    if spec["blend"] > 1 and cfg.blur_strength != 1.0:
+        rep.log(f"Motion blur strength {cfg.blur_strength:g}×")
     for n, (h, names) in enumerate(zip(info.highlights, takes_by_highlight)):
         rep.progress(n / len(info.highlights), f"clip {n + 1}/{len(info.highlights)}: {h.name}")
         try:
-            takes = [(encode.find_take(raw_dir, name), name) for name in names]
+            takes = [encode.find_take(raw_dir, name, packer) for name in names]
         except FileNotFoundError as e:
             rep.log(f"  {h.name}: skipped, {e}")
             continue
@@ -226,7 +243,10 @@ def process(cfg: Config, demo: Path, rep: Reporter | None = None, mode: str | No
         while True:
             try:
                 encode.encode_clip(takes, out, spec["render_fps"], spec["blend"], codecs[0], cfg.quality,
-                                   height=cfg.final_height if cfg.final_height != cfg.height else 0)
+                                   height=cfg.final_height if cfg.final_height != cfg.height else 0,
+                                   profile=cfg.video_profile, blur=cfg.blur_strength,
+                                   compact_level=cfg.compact_level, full_color=cfg.full_color,
+                                   source_height=cfg.height)
                 break
             except subprocess.CalledProcessError as e:
                 if len(codecs) == 1:

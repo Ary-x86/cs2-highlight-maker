@@ -27,6 +27,11 @@ MODES = {
     "smooth120": {"render_fps": 120, "blend": 1},
     "blur60": {"render_fps": 240, "blend": 4},
 }
+# standard: JPG frames, normal encode. clean: lossless frames and a sharper encode (fewer blocks, cleaner colours).
+# compact: small H.264 files for sharing, see encode.COMPACT_LEVELS.
+PROFILES = ("standard", "clean", "compact")
+# Extra motion blur for blur60: 1.0 blends exactly one output frame's worth of rendered frames.
+BLUR_STRENGTHS = (1.0, 1.25, 1.5, 1.75, 2.0)
 CROSSHAIR_CHOICES = ("donk", "classic", "custom")
 # auto: NVIDIA NVENC if there is an NVIDIA GPU, else VAAPI on Linux / AMF or Quick Sync on Windows (AMD/Intel),
 # else CPU. Falls back to CPU on errors.
@@ -67,6 +72,10 @@ class Config:
     height: int = 1080
     output_height: int = 0
     graphics: str = "normal"
+    video_profile: str = "standard"
+    compact_level: int = 3  # 1 = smallest files ... 5 = best looking
+    full_color: bool = False  # clean only: 4:4:4 colour, plays in VLC/mpv/editors but not on phones or browsers
+    blur_strength: float = 1.0
     crosshair: str = "donk"
     custom_crosshair: dict = field(default_factory=lambda: dict(DEFAULT_CUSTOM_CROSSHAIR))
     # Highlight rules
@@ -140,6 +149,15 @@ class Config:
         if self.video_codec not in CODECS:
             raise FriendlyError("Unknown encoder", f"'{self.video_codec}' is not supported.",
                                 f"Use one of: {', '.join(CODECS)}.")
+        if self.video_profile not in PROFILES:
+            raise FriendlyError("Unknown video quality", f"'{self.video_profile}' is not a choice.",
+                                f"Use one of: {', '.join(PROFILES)}.")
+        if self.compact_level not in range(1, 6):
+            raise FriendlyError("Unknown file size level", f"'{self.compact_level}' is not between 1 and 5.",
+                                "Use a whole number from 1 (smallest) to 5 (best looking).")
+        if self.blur_strength not in BLUR_STRENGTHS:
+            raise FriendlyError("Unknown motion blur strength", f"'{self.blur_strength}' is not a choice.",
+                                f"Use one of: {', '.join(map(str, BLUR_STRENGTHS))}.")
         if self.graphics not in GRAPHICS:
             raise FriendlyError("Unknown graphics setting", f"'{self.graphics}' is not a choice.",
                                 f"Use one of: {', '.join(GRAPHICS)}.")

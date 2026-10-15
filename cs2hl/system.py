@@ -20,6 +20,17 @@ BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.paren
 
 # Keep console windows from flashing up for helper programs (tasklist, ffmpeg...) on Windows.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
+# Same, at lower CPU priority, for work that runs alongside CS2 while it records (see lower_priority on Linux).
+BACKGROUND = ({"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS} if IS_WINDOWS
+              else {})
+
+
+def lower_priority(pid: int) -> None:
+    if not IS_WINDOWS:
+        try:
+            os.setpriority(os.PRIO_PROCESS, pid, 10)
+        except OSError:
+            pass
 
 # Per-platform CS2 layout, relative to the "Counter-Strike Global Offensive" folder.
 if IS_WINDOWS:
